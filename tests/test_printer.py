@@ -7,6 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 from mcp.server.mcpserver.exceptions import ToolError
+from mcp.shared.exceptions import NoBackChannelError
 
 from print_copilot import cli, mcp_server
 from print_copilot.errors import ConfirmationError, PrinterError
@@ -228,10 +229,8 @@ def test_nozzle_mismatch_blocks_and_spool_mismatch_warns(cube_gcode, tmp_path) -
         name = actions.upload_gcode(client, cube_gcode).name
         plan = actions.plan_start(client, name)
     messages = [(c.level, c.message) for c in plan.checks]
-    assert ("error", "Head 1 (T0): file expects a 0.4 mm nozzle, printer reports 0.6 mm.") in (
-        messages
-    )
-    assert ("warning", "Head 1 (T0): file uses PLA, RFID spool is PETG.") in messages
+    assert ("error", "T0: file expects a 0.4 mm nozzle, printer reports 0.6 mm.") in (messages)
+    assert ("warning", "T0: file uses PLA, RFID spool is PETG.") in messages
     assert plan.blocked
 
 
@@ -255,7 +254,7 @@ def test_different_spool_colour_is_a_warning(client, cube_gcode, tmp_path) -> No
     plan = actions.plan_start(client, actions.upload_gcode(client, red).name)
     assert not plan.blocked
     assert [c.message for c in plan.checks] == [
-        "Head 1 (T0): file colour #FB0207, RFID spool colour #E2DEDB (delta E 106.6)."
+        "T0: file colour #FB0207, RFID spool colour #E2DEDB (delta E 106.6)."
     ]
 
 
@@ -274,12 +273,14 @@ def test_safety_actions_are_not_gated(fake, client, stored) -> None:
 # MCP tools
 
 
-def _ctx(can_elicit: bool, answer: bool | None):
+def _ctx(can_elicit: bool, answer: bool | None, *, back_channel: bool = True):
     class Session:
         def check_client_capability(self, capability):
             return can_elicit
 
     async def elicit(message, schema):
+        if not back_channel:
+            raise NoBackChannelError("elicitation/create")
         if answer is None:
             return SimpleNamespace(action="decline", data=None)
         return SimpleNamespace(action="accept", data=schema(start=answer))
@@ -327,6 +328,15 @@ def test_mcp_start_without_elicitation_uses_the_token(mcp_env, cube_gcode) -> No
     assert sent["confirmed_by"].startswith("plan token")
 
 
+def test_mcp_start_when_advertised_elicitation_cannot_be_sent(mcp_env, cube_gcode) -> None:
+    mcp_server.upload_to_printer(str(cube_gcode))
+    plan = mcp_server.plan_print_start(cube_gcode.name)
+    ctx = _ctx(True, None, back_channel=False)
+    sent = asyncio.run(mcp_server.start_print(plan["token"], ctx))
+    assert sent["confirmed_by"] == "plan token (client elicitation unavailable)"
+    assert mcp_env.state.print_state == "printing"
+
+
 def test_mcp_blocked_plan_has_no_token(mcp_env, cube_gcode) -> None:
     mcp_server.upload_to_printer(str(cube_gcode))
     mcp_env.state.klippy_state = "shutdown"
@@ -341,7 +351,7 @@ def test_mcp_blocked_plan_has_no_token(mcp_env, cube_gcode) -> None:
 def test_cli_status_and_dry_run(capsys, fake, client, stored) -> None:
     assert cli.main(["printer", "status", "--printer-url", fake.url]) == 0
     out, _ = capsys.readouterr()
-    assert "Head 1 (active)" in out
+    assert "T0 (active)" in out
     assert "Polymaker PLA SnapSpeed #E2DEDB" in out
     assert "Ready to start a print: yes" in out
     fake.sent.clear()

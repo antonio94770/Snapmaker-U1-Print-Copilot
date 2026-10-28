@@ -96,6 +96,18 @@ def test_invalid_json_is_ignored(library: PresetLibrary) -> None:
     assert all(ref.path.name != "not_json.json" for ref in library.refs("filament"))
 
 
+def test_preset_with_utf8_bom_is_read(orca_data, tmp_path) -> None:
+    import shutil
+
+    data = tmp_path / "data"
+    shutil.copytree(orca_data, data)
+    refs = PresetLibrary(data).refs("process")
+    process = next(ref.path for ref in refs if ref.name == U1_PROCESS)
+    process.write_bytes(b"\xef\xbb\xbf" + process.read_bytes())
+    resolved = PresetLibrary(data).resolve("process", U1_PROCESS)
+    assert resolved.settings["layer_height"] == "0.2"
+
+
 def test_missing_system_folder_fails(tmp_path) -> None:
     with pytest.raises(PresetError, match="No system presets folder"):
         PresetLibrary(tmp_path)

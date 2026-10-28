@@ -680,7 +680,7 @@ def cmd_printer_status(args: argparse.Namespace) -> int:
         )
         active = " (active)" if head.object_name == status.active_head else ""
         print(
-            f"Head {head.index + 1}{active}: {head.temperature_c} / {head.target_c} C, "
+            f"T{head.index}{active}: {head.temperature_c} / {head.target_c} C, "
             f"{head.nozzle_diameter_mm} mm nozzle, {loaded}"
         )
     print(f"Ready to start a print: {'yes' if status.ready_to_start else 'no'}")
@@ -718,7 +718,7 @@ def _print_plan(plan: printer.StartPlan) -> None:
         )
     for head in plan.heads:
         print(
-            f"  Head {head.index + 1}: needs {head.filament_type} {head.colour or ''} "
+            f"  T{head.index}: needs {head.filament_type} {head.colour or ''} "
             f"({head.weight_g} g); RFID spool: {head.loaded_type or 'none read'} "
             f"{head.loaded_colour or ''}"
         )

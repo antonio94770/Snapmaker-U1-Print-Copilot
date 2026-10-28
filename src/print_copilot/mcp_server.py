@@ -24,6 +24,7 @@ from typing import Any, Literal, ParamSpec, TypeVar
 
 from mcp.server.mcpserver import Context, Image, MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
+from mcp.shared.exceptions import NoBackChannelError
 from mcp.types import (
     ClientCapabilities,
     ElicitationCapability,
@@ -756,7 +757,7 @@ def _confirmation_message(plan: printer.StartPlan) -> str:
         lines.append(f"Slicer estimate: {plan.estimated_time_s} s, {plan.filament_total_g} g")
     for head in plan.heads:
         lines.append(
-            f"Head {head.index + 1}: needs {head.filament_type} {head.colour or ''} "
+            f"T{head.index}: needs {head.filament_type} {head.colour or ''} "
             f"({head.weight_g} g), RFID spool: {head.loaded_type or 'none read'}"
         )
     lines += [f"{c.level.upper()}: {c.message}" for c in plan.checks]
@@ -775,10 +776,18 @@ async def start_print(confirmation_token: str, ctx: Context) -> dict[str, Any]:
         plan = printer.take_plan(confirmation_token)
         confirmed_by = "plan token (client without elicitation)"
         if _can_elicit(ctx):
-            answer = await ctx.elicit(_confirmation_message(plan), StartConfirmation)
-            if answer.action != "accept" or not answer.data.start:
-                raise ConfirmationError("The user did not confirm the start; nothing was sent.")
-            confirmed_by = "user via MCP elicitation"
+            try:
+                answer = await ctx.elicit(_confirmation_message(plan), StartConfirmation)
+            except NoBackChannelError:
+                # Claude Code advertises form elicitation but its transport cannot
+                # send the request (seen 2026-10-28). The client cannot ask the
+                # user, so it is a client without elicitation: the token decides.
+                answer = None
+                confirmed_by = "plan token (client elicitation unavailable)"
+            if answer is not None:
+                if answer.action != "accept" or not answer.data.start:
+                    raise ConfirmationError("The user did not confirm the start; nothing was sent.")
+                confirmed_by = "user via MCP elicitation"
         return to_jsonable(
             printer.execute_start(MoonrakerClient(), plan, confirmed_by=confirmed_by)
         )

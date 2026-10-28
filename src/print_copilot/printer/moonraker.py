@@ -110,6 +110,7 @@ class MoonrakerClient:
         body: bytes | None = None,
         headers: dict[str, str] | None = None,
         timeout_s: float | None = None,
+        unwrapped_key: str | None = None,
     ) -> Any:
         http_request = urllib.request.Request(
             request.url(self.base_url), data=body, method=request.method, headers=headers or {}
@@ -134,6 +135,12 @@ class MoonrakerClient:
             data = json.loads(payload)
         except ValueError as exc:
             raise PrinterError(f"{request.path} returned something that is not JSON") from exc
+        if unwrapped_key is not None:
+            if not isinstance(data, dict) or unwrapped_key not in data:
+                raise PrinterError(
+                    f"{request.path} returned JSON without an {unwrapped_key!r} field"
+                )
+            return data
         if not isinstance(data, dict) or "result" not in data:
             raise PrinterError(f"{request.path} returned JSON without a 'result' field")
         return data["result"]
@@ -169,7 +176,10 @@ class MoonrakerClient:
     def upload(self, local: Path, remote_name: str) -> dict[str, Any]:
         """Multipart upload into `gcodes`. Never asks Moonraker to start the file.
 
-        Standard Moonraker `POST /server/files/upload`: TO VERIFY ON HARDWARE.
+        Standard Moonraker `POST /server/files/upload`. Unlike every other
+        endpoint its reply is not wrapped in `result`: it is the object itself,
+        `{"item": {...}, "action": "create_file", ...}` (verified on the U1,
+        firmware 2.0.0, 2026-10-28).
         """
         remote = PurePosixPath(check_remote_name(remote_name))
         boundary = f"----print-copilot-{secrets.token_hex(12)}"
@@ -193,6 +203,7 @@ class MoonrakerClient:
             body=b"".join(parts),
             headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
             timeout_s=UPLOAD_TIMEOUT_S,
+            unwrapped_key="item",
         )
 
 

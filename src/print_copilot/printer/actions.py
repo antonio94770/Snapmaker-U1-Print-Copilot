@@ -207,7 +207,7 @@ def _checks(meta: dict[str, Any], status: PrinterStatus, uses: list[HeadUse]) ->
         checks.append(Check("error", "The file's metadata lists no filament per head."))
     heads = {h.index: h for h in status.heads}
     for use in uses:
-        label = f"Head {use.index + 1} (T{use.index})"
+        label = f"T{use.index}"
         head = heads.get(use.index)
         if head is None:
             checks.append(Check("error", f"{label} is used by the file but not reported."))

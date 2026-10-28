@@ -256,9 +256,12 @@ class FakeMoonraker:
                     code, value = fake.handle(
                         self.command, url.path, params, body, self.headers.get("Content-Type", "")
                     )
-                payload = (
-                    {"result": value} if code < 400 else {"error": {"code": code, "message": value}}
-                )
+                if code >= 400:
+                    payload = {"error": {"code": code, "message": value}}
+                elif url.path == "/server/files/upload":
+                    payload = value  # the real upload reply has no `result` wrapper
+                else:
+                    payload = {"result": value}
                 data = json.dumps(payload).encode()
                 self.send_response(code)
                 self.send_header("Content-Type", "application/json")

@@ -78,8 +78,11 @@ class PresetListing:
 
 
 def _read_json(path: Path) -> dict[str, Any] | None:
+    # Some bundled presets start with a UTF-8 BOM (in 2.4.1:
+    # "0.20mm Standard @Snapmaker U1 (0.4 nozzle).json" and fdm_process_common.json);
+    # plain "utf-8" makes json reject them and the preset silently disappears.
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8-sig"))
     except (OSError, ValueError):
         return None
     return data if isinstance(data, dict) else None
