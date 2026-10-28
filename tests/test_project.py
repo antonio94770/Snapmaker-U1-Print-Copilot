@@ -6,6 +6,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from print_copilot import multicolor
 from print_copilot.errors import ModelError
 from print_copilot.model.mesh import load_3mf_items
 from print_copilot.orca.project import (
@@ -17,7 +18,7 @@ from print_copilot.orca.project import (
     write_app_project,
     write_slicing_copy,
 )
-from synthetic_project import COLOURS, build_project
+from synthetic_project import COLOURS, build_project, with_left_cube_settings, with_replaced
 
 BED = (270.0, 270.0, 270.0)
 
@@ -52,6 +53,41 @@ def test_read_project(project_file: Path) -> None:
     assert any("object id(s) ['99']" in n for n in project.notes)
     with pytest.raises(ModelError, match="no plate 3"):
         project.plate(3)
+
+
+def test_object_setting_overrides(tmp_path: Path, project_file: Path) -> None:
+    # As MakerWorld projects do: settings stored on the object and on a part.
+    path = with_left_cube_settings(
+        project_file,
+        tmp_path / "overrides.3mf",
+        '<metadata key="enable_support" value="1"/>'
+        '<metadata key="sparse_infill_density" value="5%"/>',
+    )
+    path = with_replaced(
+        path,
+        tmp_path / "overrides2.3mf",
+        MODEL_CONFIG,
+        '<part id="3" subtype="normal_part">',
+        '<part id="3" subtype="normal_part"><metadata key="wall_loops" value="4"/>'
+        '<metadata key="source_object_id" value="0"/><metadata key="matrix" value="1 0 0 0"/>',
+    )
+    project = read_project(path)
+    left, tower, far = project.objects[:3]
+    assert left.overrides == {"enable_support": "1", "sparse_infill_density": "5%"}
+    assert left.setting_overrides() == {"object": left.overrides}
+    assert tower.overrides == {} and tower.parts[1].overrides == {"wall_loops": "4"}
+    assert tower.setting_overrides() == {"normal_part 3": {"wall_loops": "4"}}
+    assert far.setting_overrides() == {}
+
+    summary = multicolor.inspect_project(path)
+    assert summary.plates[0].object_settings == {
+        "left cube": {"object": {"enable_support": "1", "sparse_infill_density": "5%"}},
+        "tower": {"normal_part 3": {"wall_loops": "4"}},
+    }
+    assert summary.plates[1].object_settings == {}
+    note = next(n for n in summary.notes if "'left cube'" in n)
+    assert "object: enable_support=1, sparse_infill_density=5%" in note
+    assert "G-code header lists only the process values" in note
 
 
 def test_plain_3mf_is_one_plate(tmp_path: Path, project_file: Path) -> None:

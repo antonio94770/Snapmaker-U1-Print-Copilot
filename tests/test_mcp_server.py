@@ -106,6 +106,17 @@ def test_tool_error_reaches_the_client(fake_orca, model) -> None:
         asyncio.run(call())
 
 
+def test_unexpected_errors_keep_their_message() -> None:
+    # Any exception, not only Print Copilot's own, reaches the client with its
+    # type and message instead of a bare "Error executing tool".
+    @mcp_server._tool_errors
+    def broken() -> None:
+        raise FileNotFoundError("C:/missing/folder")
+
+    with pytest.raises(ToolError, match=r"Unexpected FileNotFoundError: C:/missing/folder"):
+        broken()
+
+
 TEE = str(Path(__file__).parent / "fixtures" / "tee.stl")
 
 

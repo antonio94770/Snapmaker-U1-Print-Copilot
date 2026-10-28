@@ -74,6 +74,22 @@ FILAMENT_KEYS: tuple[str, ...] = (
     "support_filament",
     "support_interface_filament",
 )
+# Object and part metadata that describes the mesh, not a print setting.
+# Every other key is a setting that overrides the process preset for that
+# object or part (e.g. sparse_infill_density, enable_support).
+NON_SETTING_KEYS: frozenset[str] = frozenset(
+    {
+        "name",
+        "matrix",
+        "source_file",
+        "source_object_id",
+        "source_volume_id",
+        "source_offset_x",
+        "source_offset_y",
+        "source_offset_z",
+        *FILAMENT_KEYS,
+    }
+)
 # Metadata files whose content is lost in the slicing copy; a note says so.
 DROPPED_FEATURES: dict[str, str] = {
     "Metadata/custom_gcode_per_print_z.xml": "per-layer colour changes and custom G-code",
@@ -106,6 +122,7 @@ class ProjectPart:
     painted: list[int]  # painted filament numbers, 1-based
     settings: dict[str, int] = field(default_factory=dict)  # other FILAMENT_KEYS
     source: str = ROOT_MODEL  # archive file holding the mesh
+    overrides: dict[str, str] = field(default_factory=dict)  # process settings of this part
 
 
 @dataclass
@@ -116,6 +133,16 @@ class ProjectObject:
     parts: list[ProjectPart]
     plate: int | None
     settings: dict[str, int] = field(default_factory=dict)  # other FILAMENT_KEYS
+    overrides: dict[str, str] = field(default_factory=dict)  # process settings of this object
+
+    def setting_overrides(self) -> dict[str, dict[str, str]]:
+        """Process settings the project sets on this object or its parts,
+        keyed by "object" or the part's name; empty when it sets none."""
+        found = {"object": dict(self.overrides)} if self.overrides else {}
+        for part in self.parts:
+            if part.overrides:
+                found[f"{part.subtype} {part.name or part.id}"] = dict(part.overrides)
+        return found
 
     def filaments(self) -> list[int]:
         """Filament numbers this object prints with (1-based)."""
@@ -191,6 +218,10 @@ def _metadata(element: ElementTree.Element) -> dict[str, str]:
 
 def _filament_settings(meta: Mapping[str, str]) -> dict[str, int]:
     return {k: _int(meta[k]) for k in FILAMENT_KEYS[1:] if k in meta}
+
+
+def _setting_overrides(meta: Mapping[str, str]) -> dict[str, str]:
+    return {k: v for k, v in meta.items() if k and k not in NON_SETTING_KEYS}
 
 
 class _Archive:
@@ -293,6 +324,17 @@ def _project_filaments(arc: _Archive, notes: list[str]) -> tuple[str | None, lis
     )
 
 
+def read_project_settings(path: str | os.PathLike[str]) -> dict[str, object]:
+    """The settings the project was saved with (`project_settings.config`);
+    empty when the 3MF has none or they are not valid JSON."""
+    try:
+        with zipfile.ZipFile(path) as archive:
+            config = json.loads(archive.read(PROJECT_CONFIG))
+    except (OSError, KeyError, ValueError, zipfile.BadZipFile):
+        return {}
+    return config if isinstance(config, dict) else {}
+
+
 def read_project(path: str | os.PathLike[str]) -> ProjectInfo:
     """Read objects, parts, filament assignments, painting and plates of a 3MF."""
     mf_path = Path(path)
@@ -371,6 +413,7 @@ def read_project(path: str | os.PathLike[str]) -> ProjectInfo:
                         painted=sorted(arc.painted(comp_part, comp_id)),
                         settings=_filament_settings(pm),
                         source=comp_part,
+                        overrides=_setting_overrides(pm),
                     )
                 )
             plate = next((p.number for p in plates if object_id in p.object_ids), None)
@@ -382,6 +425,7 @@ def read_project(path: str | os.PathLike[str]) -> ProjectInfo:
                     parts=parts,
                     plate=plate,
                     settings=_filament_settings(meta),
+                    overrides=_setting_overrides(meta),
                 )
             )
 

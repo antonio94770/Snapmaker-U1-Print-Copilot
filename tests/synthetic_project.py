@@ -122,7 +122,7 @@ def build_project(path: str | Path, *, application: str = "BambuStudio-02.00.00.
         '{"printer_settings_id": "Bambu Lab X1 Carbon 0.4 nozzle", '
         f'"filament_colour": {COLOURS!r}, "filament_type": ["PLA", "PLA", "PLA", "PLA", "PLA"], '
         '"filament_settings_id": ["Generic PLA", "Generic PLA", "Generic PLA", "Generic PLA", '
-        '"Generic PLA"]}'
+        '"Generic PLA"], "layer_height": "0.16", "wall_loops": "2", "enable_support": "0"}'
     ).replace("'", '"')
     rels = (
         '<?xml version="1.0" encoding="UTF-8"?><Relationships '
@@ -150,6 +150,26 @@ def build_project(path: str | Path, *, application: str = "BambuStudio-02.00.00.
         archive.writestr("Metadata/project_settings.config", settings)
         archive.writestr("Metadata/plate_1.png", b"not a real png")
     return out
+
+
+def with_replaced(source: Path, target: Path, member: str, old: str, new: str) -> Path:
+    """Copy of a 3MF with one text replacement in one of its files."""
+    with zipfile.ZipFile(source) as zin, zipfile.ZipFile(target, "w") as zout:
+        for info in zin.infolist():
+            data = zin.read(info)
+            if info.filename == member:
+                text = data.decode()
+                assert old in text
+                data = text.replace(old, new, 1).encode()
+            zout.writestr(info, data)
+    return target
+
+
+def with_left_cube_settings(source: Path, target: Path, settings: str) -> Path:
+    """Copy of the synthetic project whose 'left cube' object carries
+    `settings` (metadata elements) in its model settings."""
+    name = _meta("name", "left cube")
+    return with_replaced(source, target, "Metadata/model_settings.config", name, name + settings)
 
 
 if __name__ == "__main__":

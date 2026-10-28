@@ -12,7 +12,9 @@ from print_copilot.actions import Variant, run_slice, select_presets
 from print_copilot.errors import ModelError, SliceError
 from print_copilot.orca.project import PROJECT_CONFIG, read_project
 from print_copilot.printer.status import HeadStatus, LoadedFilament
-from synthetic_project import build_project
+from synthetic_project import build_project, with_left_cube_settings
+
+TEE = Path(__file__).parent / "fixtures" / "tee.stl"
 
 U1 = "Snapmaker U1 (0.4 nozzle)"
 
@@ -21,6 +23,7 @@ class FakeMultiOrca:
     """Writes G-code like the U1 slices: the heads the 3MF assigns (object and
     part extruders, painting) print 3 layers; with the prime tower each change
     purges 1 mm. `print_sequence = by object` changes tools once per head.
+    Support (on in the process or on an object) adds 2 mm of `Support`.
     With `tower_conflict`, a run without `wipe_tower_x` fails like the real
     slicer when the tower overlaps an object."""
 
@@ -66,6 +69,12 @@ class FakeMultiOrca:
                     used[head] += 1
             lines += [";TYPE:Outer wall", "G1 X10 Y10 E10"]
             used[head] += 10
+        support = process.get("enable_support") == "1" or any(
+            o.overrides.get("enable_support") == "1" for o in project.objects
+        )
+        if support:
+            lines += [";TYPE:Support", "G1 X2 Y2 E2"]
+            used[current] += 2
         mm = [used[h] for h in range(len(filaments))]
         grams = [round(v * 0.003, 2) for v in mm]
         changes = sum(1 for line in lines if line.startswith("T")) - 1
@@ -80,7 +89,15 @@ class FakeMultiOrca:
             f"; printer_settings_id = {machine['name']}",
             f"; print_settings_id = {process['name']}",
         ]
-        for key in ("enable_prime_tower", "print_sequence", "wipe_tower_x", "wipe_tower_y"):
+        for key in (
+            "enable_prime_tower",
+            "print_sequence",
+            "wipe_tower_x",
+            "wipe_tower_y",
+            "enable_support",
+            "support_type",
+            "support_threshold_angle",
+        ):
             value = process.get(key)
             if value is not None:
                 lines.append(f"; {key} = {value[0] if isinstance(value, list) else value}")
@@ -117,6 +134,78 @@ def test_inspect_project(project_file, selection) -> None:
     assert plate1.assignment.mapping() == {1: 4, 2: 3, 3: 2, 4: 1}  # red, green, blue, white
     assert plate2.assignment.mapping() == {4: 1, 5: 2}  # white -> T0, black -> T1
     assert any("object id(s) ['99']" in n for n in summary.notes)
+    # Sizes measured from the meshes as placed; the U1 bed is 270 x 270 x 270.05 mm.
+    assert summary.bed_mm == [270.0, 270.0, 270.05]
+    assert set(plate1.object_sizes_mm) == {"left cube", "tower"}
+    assert plate1.fits_bed is True and plate1.size_mm is not None
+    # The project was saved at 0.16 mm; the U1 preset prints 0.2 mm. Equal
+    # values (wall_loops 2, enable_support 0) are not listed.
+    assert summary.setting_differences == [
+        multicolor.SettingDifference("layer_height", "0.16", "0.2")
+    ]
+    assert any("layer_height 0.16 -> 0.2" in n for n in summary.notes)
+
+
+def test_setting_differences_follow_overrides(project_file, selection) -> None:
+    assert multicolor.setting_differences(project_file, selection, {"layer_height": 0.16}) == []
+    differences = multicolor.setting_differences(
+        project_file, selection, {"enable_support": True, "filament.layer_height": 1}
+    )
+    assert [(d.key, d.project, d.used) for d in differences] == [
+        ("layer_height", "0.16", "0.2"),
+        ("enable_support", "0", "1"),
+    ]
+    assert multicolor.setting_differences(TEE, selection) == []  # an STL stores none
+
+
+def test_plate_too_big_for_the_bed(project_file, selection) -> None:
+    selection.machine.settings["printable_height"] = "1"
+    summary = multicolor.inspect_project(project_file, selection)
+    assert summary.plates[0].fits_bed is False
+    assert any("Plate 1 measures" in n and "larger than the printable" in n for n in summary.notes)
+
+
+def test_slice_reports_supports(fake_install, fake_multi, project_file, selection, tmp_path):
+    result = multicolor.slice_project(
+        fake_install, project_file, selection, plate=2, work_dir=tmp_path / "a"
+    )
+    assert result.support.support_g == 0 and result.support.enabled_in_process is False
+    assert not any("Support" in n for n in result.notes)
+
+    on = multicolor.slice_project(
+        fake_install,
+        project_file,
+        selection,
+        plate=2,
+        overrides={"enable_support": True},
+        work_dir=tmp_path / "b",
+    )
+    assert on.support.enabled_in_process is True
+    # 2 mm of support at the header's g/mm ratio (its grams are rounded to 0.01).
+    assert on.support.support_g == pytest.approx(2 * 0.003, abs=0.005)
+    assert on.support.threshold_deg == "30"
+    assert not any("Supports are printed" in n for n in on.notes)
+
+    # Support turned on by the object only, as MakerWorld projects do.
+    model = with_left_cube_settings(
+        project_file, tmp_path / "object.3mf", '<metadata key="enable_support" value="1"/>'
+    )
+    by_object = multicolor.slice_project(
+        fake_install, model, selection, plate=1, work_dir=tmp_path / "c"
+    )
+    assert by_object.support.enabled_by_objects == ["left cube"]
+    assert by_object.support.support_g > 0
+    assert any(
+        "Supports are printed" in n and "object(s) ['left cube']" in n for n in by_object.notes
+    )
+
+
+def test_support_on_without_supports_is_reported() -> None:
+    support = multicolor.SupportSummary(True, "tree(auto)", "30", [], 0.0, 0.0)
+    assert multicolor.support_notes(support) == [
+        "Support is on, but the slicer generated none: no overhang is flatter than the "
+        "support threshold (30 degrees from horizontal)."
+    ]
 
 
 def test_slice_project(fake_install, fake_multi, project_file, selection, tmp_path) -> None:

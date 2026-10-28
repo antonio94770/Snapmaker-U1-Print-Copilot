@@ -23,10 +23,11 @@ from pathlib import Path
 import numpy as np
 
 from print_copilot.actions import CONF_SOURCE, Selection, Variant, bed_size
-from print_copilot.errors import PrintCopilotError, SliceError
+from print_copilot.errors import GcodeParseError, PrintCopilotError, SliceError
+from print_copilot.gcode.features import feature_extrusion
 from print_copilot.gcode.toolchanges import ToolChangeStats, grams_per_mm, to_grams, tool_changes
 from print_copilot.model.footprint import free_rectangle, occupancy
-from print_copilot.model.mesh import load_mesh
+from print_copilot.model.mesh import load_3mf_items, load_mesh
 from print_copilot.orca.conf import current_setup, default_conf_path
 from print_copilot.orca.heads import (
     CLEARLY_DIFFERENT_DELTA_E,
@@ -43,6 +44,7 @@ from print_copilot.orca.project import (
     is_project,
     project_settings,
     read_project,
+    read_project_settings,
     write_app_project,
     write_model_project,
     write_slicing_copy,
@@ -193,6 +195,133 @@ def wanted_filaments(project: ProjectInfo, plate: int) -> list[Wanted]:
     return result
 
 
+def object_settings(project: ProjectInfo, plate: int) -> dict[str, dict[str, dict[str, str]]]:
+    """Process settings the project sets on the plate's objects and parts:
+    object name -> "object" or part -> {key: value}."""
+    found = {}
+    for obj in project.plate_objects(plate):
+        overrides = obj.setting_overrides()
+        if overrides:
+            found[obj.name or obj.id] = overrides
+    return found
+
+
+def object_settings_notes(settings: dict[str, dict[str, dict[str, str]]]) -> list[str]:
+    """One note per object that overrides process settings: the slicer uses
+    these values for that object, and the G-code header shows only the
+    process values."""
+    notes = []
+    for name, places in settings.items():
+        listed = "; ".join(
+            f"{place}: " + ", ".join(f"{k}={v}" for k, v in sorted(values.items()))
+            for place, values in places.items()
+        )
+        notes.append(
+            f"Object {name!r} sets its own settings, which override the process preset for "
+            f"it ({listed}). The G-code header lists only the process values."
+        )
+    return notes
+
+
+# Process settings compared between the project and the preset it is sliced
+# with: the ones that change how the print looks, holds or how long it takes.
+COMPARED_SETTINGS: tuple[str, ...] = (
+    "layer_height",
+    "initial_layer_print_height",
+    "wall_loops",
+    "top_shell_layers",
+    "bottom_shell_layers",
+    "sparse_infill_density",
+    "sparse_infill_pattern",
+    "enable_support",
+    "support_type",
+    "support_threshold_angle",
+    "support_on_build_plate_only",
+    "brim_type",
+    "seam_position",
+    "ironing_type",
+)
+
+
+@dataclass
+class SettingDifference:
+    key: str
+    project: str  # value saved in the project
+    used: str  # value of the process preset, with overrides
+
+
+def _setting_text(value: object) -> str:
+    if isinstance(value, bool):  # an override; presets store "0" / "1"
+        return "1" if value else "0"
+    if isinstance(value, list):
+        return ",".join(str(v) for v in value)
+    return str(value)
+
+
+def _same_setting(a: str, b: str) -> bool:
+    try:
+        return float(a.rstrip("%")) == float(b.rstrip("%")) and a.endswith("%") == b.endswith("%")
+    except ValueError:
+        return a == b
+
+
+def setting_differences(
+    source: str | os.PathLike[str],
+    selection: Selection,
+    overrides: dict[str, OverrideValue] | None = None,
+) -> list[SettingDifference]:
+    """`COMPARED_SETTINGS` whose value saved in the project differs from the
+    process preset it is sliced with (after process overrides). Empty for a
+    file that stores no settings, such as an STL."""
+    saved = read_project_settings(source)
+    used = dict(selection.process.settings)
+    for key, value in (overrides or {}).items():
+        if not key.startswith(("machine.", "filament.")):
+            used[key.removeprefix("process.")] = value
+    found = []
+    for key in COMPARED_SETTINGS:
+        if key not in saved or key not in used:
+            continue
+        project, mine = _setting_text(saved[key]), _setting_text(used[key])
+        if not _same_setting(project, mine):
+            found.append(SettingDifference(key, project, mine))
+    return found
+
+
+def setting_differences_note(differences: list[SettingDifference], process: str) -> str | None:
+    if not differences:
+        return None
+    listed = ", ".join(f"{d.key} {d.project} -> {d.used}" for d in differences)
+    return (
+        f"The project was saved with settings that differ from the process {process!r} used "
+        f"here (project -> used): {listed}. Tell the user before slicing; pass overrides to "
+        "keep the project's values."
+    )
+
+
+def plate_sizes(
+    project_file: str | os.PathLike[str], project: ProjectInfo, plate: int
+) -> tuple[dict[str, list[float]], list[float] | None]:
+    """Size in mm (X, Y, Z) of each object of the plate, as placed, and of
+    everything on the plate together."""
+    ids = set(project.plate(plate).object_ids)
+    names = {o.id: o.name or o.id for o in project.objects}
+    sizes: dict[str, list[float]] = {}
+    lows, highs = [], []
+    for object_id, triangles in load_3mf_items(project_file):
+        if object_id not in ids or not len(triangles):
+            continue
+        points = triangles.reshape(-1, 3)
+        low, high = points.min(axis=0), points.max(axis=0)
+        sizes[names.get(object_id, object_id)] = [round(float(v), 1) for v in high - low]
+        lows.append(low)
+        highs.append(high)
+    if not lows:
+        return sizes, None
+    total = np.max(highs, axis=0) - np.min(lows, axis=0)
+    return sizes, [round(float(v), 1) for v in total]
+
+
 @dataclass
 class PlateSummary:
     number: int
@@ -201,6 +330,12 @@ class PlateSummary:
     filaments: list[Wanted]
     assignment: HeadAssignment | None
     assignment_error: str | None
+    # Process settings set on objects or parts: object -> place -> {key: value}.
+    object_settings: dict[str, dict[str, dict[str, str]]] = field(default_factory=dict)
+    # Measured from the mesh as placed in the project, X Y Z in mm.
+    object_sizes_mm: dict[str, list[float]] = field(default_factory=dict)
+    size_mm: list[float] | None = None
+    fits_bed: bool | None = None  # None without a printer selection
 
 
 @dataclass
@@ -212,6 +347,8 @@ class ProjectSummary:
     plates: list[PlateSummary]
     heads: list[Head]
     notes: list[str] = field(default_factory=list)
+    bed_mm: list[float] | None = None  # printable X Y Z of the selected printer
+    setting_differences: list[SettingDifference] = field(default_factory=list)
 
 
 def inspect_project(
@@ -224,8 +361,22 @@ def inspect_project(
     the proposed head for every filament of each plate (no slicing)."""
     project = read_project(model)
     heads = heads_for(selection) if selection else []
+    bed = bed_size(selection.machine) if selection else None
     plates = []
+    notes = list(project.notes)
     for plate in project.plates:
+        settings = object_settings(project, plate.number)
+        notes.extend(object_settings_notes(settings))
+        sizes, size = plate_sizes(model, project, plate.number)
+        fits = None
+        if bed and size:
+            fits = all(s <= b for s, b in zip(size, bed, strict=True))
+            if not fits:
+                notes.append(
+                    f"Plate {plate.number} measures {size[0]} x {size[1]} x {size[2]} mm, larger "
+                    f"than the printable {bed[0]:g} x {bed[1]:g} x {bed[2]:g} mm of "
+                    f"{selection.machine.name!r} (as placed; rotating or scaling may help)."
+                )
         wanted = wanted_filaments(project, plate.number)
         assignment, error = None, None
         if heads:
@@ -241,9 +392,16 @@ def inspect_project(
                 filaments=wanted,
                 assignment=assignment,
                 assignment_error=error,
+                object_settings=settings,
+                object_sizes_mm=sizes,
+                size_mm=size,
+                fits_bed=fits,
             )
         )
-    notes = list(project.notes)
+    differences = setting_differences(model, selection) if selection else []
+    note = setting_differences_note(differences, selection.process.name) if selection else None
+    if note:
+        notes.append(note)
     if selection and not selection.colours:
         notes.append(
             "The loaded colours are unknown (neither Snapmaker_Orca.conf nor the printer gave "
@@ -263,7 +421,23 @@ def inspect_project(
         plates=plates,
         heads=heads,
         notes=notes,
+        bed_mm=list(bed) if bed else None,
+        setting_differences=differences,
     )
+
+
+@dataclass
+class SupportSummary:
+    """How the plate is supported. Settings come from the process preset with
+    overrides and from the objects' own settings; grams are measured from the
+    `Support*` toolpaths and converted with the G-code's overall g/mm ratio."""
+
+    enabled_in_process: bool
+    support_type: str | None
+    threshold_deg: str | None
+    enabled_by_objects: list[str]  # objects that turn support on themselves
+    support_g: float
+    support_interface_g: float
 
 
 @dataclass
@@ -299,6 +473,7 @@ class ProjectSlice:
     gcode_path: Path
     run_dir: Path
     notes: list[str] = field(default_factory=list)
+    support: SupportSummary | None = None
 
 
 def _plate_number(project: ProjectInfo, plate: int | None) -> int:
@@ -426,6 +601,7 @@ def _prepare(
     folder: Path,
     reduce_colours: bool = False,
     head: int | None = None,
+    overrides: dict[str, OverrideValue] | None = None,
 ) -> _Prepared:
     source, wrap_notes = _as_project(model, folder)
     project = read_project(source)
@@ -453,6 +629,11 @@ def _prepare(
         bed_origin_mm=origin,
     )
     notes = wrap_notes + list(project.notes) + assignment.notes + copy.notes
+    notes += object_settings_notes(object_settings(project, number))
+    differences = setting_differences(source, selection, overrides)
+    note = setting_differences_note(differences, selection.process.name)
+    if note:
+        notes.append(note)
     if size is None:
         notes.append(f"{selection.machine.name!r} has no printable area; bed fit unchecked.")
     if project.printer and project.printer != selection.machine.name:
@@ -534,8 +715,49 @@ def slice_project(
     base = to_windows_path(work_dir) if work_dir else default_work_dir()
     folder = base / f"project-{datetime.now():%Y%m%d-%H%M%S}-{uuid.uuid4().hex[:6]}"
     folder.mkdir(parents=True)
-    prepared = _prepare(model, selection, plate, mapping, folder, reduce_colours, head)
+    prepared = _prepare(model, selection, plate, mapping, folder, reduce_colours, head, overrides)
     return _slice_prepared(install, prepared, selection, overrides, folder, timeout_s)
+
+
+def _support_summary(run: SliceRun, project: ProjectInfo, plate: int) -> SupportSummary:
+    features = feature_extrusion(run.gcode_path)
+    total_mm = sum(run.result.filament_used_mm)
+    ratio = run.result.total_filament_g / total_mm if total_mm > 0 else 0.0
+    settings = run.result.settings
+    return SupportSummary(
+        enabled_in_process=settings.get("enable_support") == "1",
+        support_type=settings.get("support_type"),
+        threshold_deg=settings.get("support_threshold_angle"),
+        enabled_by_objects=[
+            o.name or o.id
+            for o in project.plate_objects(plate)
+            if o.overrides.get("enable_support") == "1"
+        ],
+        support_g=round(features.support_mm * ratio, 2),
+        support_interface_g=round(features.feature_mm("Support interface") * ratio, 2),
+    )
+
+
+def support_notes(support: SupportSummary) -> list[str]:
+    """Say where the supports come from when the process setting alone would
+    mislead: printed while the process turns them off, or on without any."""
+    printed = support.support_g > 0
+    if printed and not support.enabled_in_process:
+        source = (
+            f"object(s) {support.enabled_by_objects} turn them on with their own settings"
+            if support.enabled_by_objects
+            else "support enforcers or painted support in the project"
+        )
+        return [
+            f"Supports are printed ({support.support_g} g measured) although the process has "
+            f"enable_support off: {source}."
+        ]
+    if not printed and (support.enabled_in_process or support.enabled_by_objects):
+        return [
+            "Support is on, but the slicer generated none: no overhang is flatter than the "
+            f"support threshold ({support.threshold_deg} degrees from horizontal)."
+        ]
+    return []
 
 
 def _slice_prepared(
@@ -574,6 +796,12 @@ def _slice_prepared(
             f"moved to X {position[0]:g}, Y {position[1]:g} (first error: {str(exc)[:200]})."
         )
     stats, ratios, heads, notes = _measure(run, prepared.assignment, selection, prepared.colours)
+    try:
+        support = _support_summary(run, prepared.project, prepared.plate)
+        notes += support_notes(support)
+    except GcodeParseError as exc:
+        support = None
+        notes.append(f"Supports not measured: {exc}")
     notes = tower_notes + notes
     result = ProjectSlice(
         project=prepared.project.path,
@@ -594,6 +822,7 @@ def _slice_prepared(
         gcode_path=run.gcode_path,
         run_dir=run.run_dir,
         notes=prepared.notes + notes,
+        support=support,
     )
     (run.run_dir / "project_slice.json").write_text(
         json.dumps(to_jsonable(result), indent=2, ensure_ascii=False), encoding="utf-8"
@@ -779,7 +1008,7 @@ def export_project(
     base = to_windows_path(work_dir) if work_dir else default_work_dir()
     folder = base / f"export-{datetime.now():%Y%m%d-%H%M%S}-{uuid.uuid4().hex[:6]}"
     folder.mkdir(parents=True)
-    prepared = _prepare(source, selection, plate, mapping, folder, reduce_colours, head)
+    prepared = _prepare(source, selection, plate, mapping, folder, reduce_colours, head, overrides)
     machine_s, process_s, filament_s = prepare_cli_settings(
         selection.machine,
         selection.process,
@@ -822,6 +1051,8 @@ def export_project(
             timeout_s=timeout_s,
         )
         shutil.copy2(sliced.gcode_path, gcode_out)
+        if sliced.support is not None:
+            notes += support_notes(sliced.support)
         notes.append(
             f"{gcode_out.name} was sliced from {out.name}: open {out} in Snapmaker Orca to see "
             "or change exactly what this G-code prints."

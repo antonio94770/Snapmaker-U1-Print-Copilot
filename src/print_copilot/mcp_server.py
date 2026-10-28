@@ -122,14 +122,20 @@ def _preset_library() -> PresetLibrary:
 
 
 def _tool_errors(fn: Callable[P, R]) -> Callable[P, R]:
-    """Turn Print Copilot errors into MCP tool errors with the same message."""
+    """Turn Print Copilot errors into MCP tool errors with the same message,
+    and any other exception into one that names its type, so the client never
+    sees only "Error executing tool"."""
 
     @functools.wraps(fn)
     def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
         try:
             return fn(*args, **kwargs)
+        except ToolError:
+            raise
         except PrintCopilotError as exc:
             raise ToolError(str(exc)) from exc
+        except Exception as exc:
+            raise ToolError(f"Unexpected {type(exc).__name__}: {exc}") from exc
 
     return wrapper
 
@@ -446,19 +452,25 @@ def inspect_project(
     filaments: list[str] | None = None,
     reduce_colours: bool = False,
     use_printer: bool = True,
+    process: str | None = None,
 ) -> dict[str, Any]:
     """Read a 3MF project without slicing: who saved it, for which printer, its
     plates, the objects and filaments (number, colour, type) each plate uses,
     and for each plate the proposed U1 tool head per filament (nearest loaded
     colour, CIE76 delta E heuristic; identical colours share a head).
+    Also: each object's size in mm as placed and whether the plate fits the
+    bed, settings the objects set themselves (object_settings), and the saved
+    settings that differ from the process preset (setting_differences). Tell
+    the user the size and those differences before slicing.
 
     model: absolute path of the .3mf.
     reduce_colours: merge the nearest colours when a plate needs more filaments
         than there are heads (heuristic; otherwise such a plate gets an error
         with the closest colour pairs).
     use_printer: as for slice_project.
+    process: process preset to compare with; default the one selected in the app.
     """
-    _, selection = _project_selection(printer, None, filaments, use_printer)
+    _, selection = _project_selection(printer, process, filaments, use_printer)
     summary = multicolor.inspect_project(model, selection, reduce_colours=reduce_colours)
     data = to_jsonable(summary)
     data["notes"] = selection.notes + data["notes"]

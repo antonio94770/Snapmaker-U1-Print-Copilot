@@ -46,6 +46,7 @@ KEY_SETTINGS: tuple[str, ...] = (
     "sparse_infill_pattern",
     "enable_support",
     "support_type",
+    "support_threshold_angle",
     "enable_prime_tower",
     "curr_bed_type",
 )

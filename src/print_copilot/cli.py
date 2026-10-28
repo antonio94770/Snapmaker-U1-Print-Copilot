@@ -464,6 +464,10 @@ def cmd_project(args: argparse.Namespace) -> int:
     for plate in summary.plates:
         name = f" '{plate.name}'" if plate.name else ""
         print(f"  plate {plate.number}{name}: {len(plate.objects)} object(s)")
+        for obj, size in plate.object_sizes_mm.items():
+            print(f"    {obj}: {size[0]} x {size[1]} x {size[2]} mm")
+        if plate.fits_bed is not None:
+            print(f"    fits the bed: {'yes' if plate.fits_bed else 'NO'}")
         used = ", ".join(f"{w.number} {w.colour or '?'} {w.type or ''}" for w in plate.filaments)
         print(f"    filaments: {used}")
         if plate.assignment:
@@ -475,6 +479,18 @@ def cmd_project(args: argparse.Namespace) -> int:
     return 0
 
 
+def _print_support(support: Any) -> None:
+    if support is None:
+        return
+    state = "on" if support.enabled_in_process else "off"
+    objects = f", on for objects {support.enabled_by_objects}" if support.enabled_by_objects else ""
+    print(
+        f"  supports  : {support.support_g:.2f} g measured ({support.support_interface_g:.2f} g "
+        f"interface); process {state}, {support.support_type}, threshold "
+        f"{support.threshold_deg} deg{objects}"
+    )
+
+
 def _print_project_slice(r: Any) -> None:
     print(f"Plate {r.plate} of {r.project} sliced: {r.gcode_path}")
     print(f"  printer   : {r.machine}")
@@ -484,6 +500,7 @@ def _print_project_slice(r: Any) -> None:
     print(f"  filament  : {r.total_filament_g:.2f} g")
     print(f"  changes   : {r.tool_changes} tool changes on {r.layers_with_changes} layers")
     print(f"  tower     : {r.prime_tower_g:.2f} g prime tower, {r.purge_g:.2f} g of it purge")
+    _print_support(r.support)
     for h in r.heads:
         print(
             f"  T{h.head}        : {h.total_g:.2f} g ({h.filament}, {h.colour}), "
@@ -592,6 +609,7 @@ def cmd_export_project(args: argparse.Namespace) -> int:
         print(f"  time      : {format_duration(r.estimated_time_s)} ({r.estimated_time_s} s)")
         print(f"  filament  : {r.total_filament_g:.2f} g")
         print(f"  changes   : {r.tool_changes} tool changes on {r.layers_with_changes} layers")
+        _print_support(r.support)
     for note in exported.notes:
         print(f"note: {note}")
     if exported.gcode_path:
