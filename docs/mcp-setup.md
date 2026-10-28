@@ -140,3 +140,17 @@ npx @modelcontextprotocol/inspector "C:\Users\you\Snapmaker_Print_Copilot\.venv\
   print with the colours I have loaded, and what should I swap?"
 - "Slice plate 2 of the mask, compare it with and without the prime tower,
   then write the faster version as a project and open it in Snapmaker Orca."
+
+## Quality workflow
+
+Before presenting a setup as reviewed, use `review_print` to create the
+effective-settings audit, comparison and image evidence. Inspect the model
+and toolpath images; `preview_gcode` can render specific critical layers.
+Call `record_quality_review` only after an actual visual inspection, with
+written observations and explicit acknowledgement of remaining warning and
+unverified finding codes. It is not a physical print confirmation.
+
+The same actions are available as `quality`, `preview` and `quality-review`
+from the CLI. [Quality review details](quality-review.md) describe the exact
+coverage and limitations. Do not claim that inventoried settings were all
+validated or that physical surface quality has been measured.

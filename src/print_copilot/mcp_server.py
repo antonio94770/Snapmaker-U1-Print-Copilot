@@ -15,6 +15,7 @@ from __future__ import annotations
 import functools
 import json
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any, Literal, ParamSpec, TypeVar
 
 from mcp.server.mcpserver import Image, MCPServer
@@ -22,7 +23,7 @@ from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import ToolAnnotations
 from pydantic import BaseModel, Field
 
-from print_copilot import __version__, actions, multicolor
+from print_copilot import __version__, actions, multicolor, quality
 from print_copilot.errors import PrintCopilotError
 from print_copilot.model.orientation import Region
 from print_copilot.orca.install import locate, locate_data_dir
@@ -35,6 +36,12 @@ R = TypeVar("R")
 
 INSTRUCTIONS = """\
 Prepares Snapmaker U1 prints with the Snapmaker Orca slicer on this computer.
+Before calling a setup reviewed, use review_print for the effective-settings
+audit and actual toolpath images. Inspect model views and critical layers with
+preview_gcode, and read warning/unverified findings. record_quality_review is
+an explicit visual-review attestation, not permission to print or a physical
+quality guarantee. Finer layers are a heuristic candidate, not a calibrated
+winner. Never claim all inventoried parameters were automatically validated.
 Start with get_current_setup to see the printer, process and per-head filaments
 selected in the app, and list_presets to find other preset names. slice and
 compare_variants run the real slicer headlessly: their times and grams are the
@@ -530,6 +537,111 @@ def export_project(
     data["notes"] = selection.notes + data["notes"]
     data["opened_with"] = multicolor.open_in_app(install, exported.path) if open_in_app else None
     return data
+
+
+@server.tool(annotations=SLICING)
+@_tool_errors
+def review_print(
+    model: str,
+    printer: str | None = None,
+    process: str | None = None,
+    filaments: list[str] | None = None,
+    plate: int | None = None,
+    mapping: dict[str, int] | None = None,
+    reduce_colours: bool = False,
+    compare: bool = True,
+    variants: list[VariantSpec] | None = None,
+    max_segments: int = 1_000_000,
+) -> list[str | Image]:
+    """Review STL/one 3MF plate or existing G-code before preparing a print.
+
+    Inventory every effective setting, flag detected errors and unverified
+    conditions, and generate model views and actual G-code layer previews.
+    For models, compare baseline with a finer-layer heuristic candidate by
+    default. Custom variants use the same override schema as compare_variants.
+    Existing G-code needs no Orca installation and is only audited.
+    Images show selected layers; use preview_gcode for additional critical layers
+    and open the offline HTML for every layer. Black dots are outer-wall path
+    starts (seam candidates), not verified seams. No physical roughness is predicted.
+    Read findings and actually inspect images before record_quality_review.
+    No physical print is authorized, and calibration/hardware remain unverified.
+    """
+    install = selection = None
+    if Path(model).suffix.lower() != ".gcode":
+        install, selection = _project_selection(printer, process, filaments)
+    elif printer or process or filaments:
+        raise quality.QualityError(
+            "Existing G-code uses its own effective config; omit preset choices."
+        )
+    specs = (
+        [actions.Variant(dict(v.overrides), label=v.label) for v in variants] if variants else None
+    )
+    report = quality.review_print(
+        model,
+        install=install,
+        selection=selection,
+        plate=plate,
+        mapping=_mapping(mapping),
+        reduce_colours=reduce_colours,
+        compare=compare,
+        variants=specs,
+        max_segments=max_segments,
+    )
+    result: list[str | Image] = [json.dumps(to_jsonable(report), ensure_ascii=False)]
+    for index, variant in enumerate(report.variants):
+        if variant.error:
+            continue
+        if index == 0 and variant.model_preview:
+            result.append(Image(data=variant.model_preview.read_bytes(), format="png"))
+        if variant.preview:
+            result.append(f"{variant.label}: layers {variant.preview.layers_shown}")
+            result.append(Image(data=variant.preview.png_path.read_bytes(), format="png"))
+    return result
+
+
+@server.tool(annotations=SLICING)
+@_tool_errors
+def preview_gcode(
+    gcode: str, layers: list[int] | None = None, max_segments: int = 1_000_000
+) -> list[str | Image]:
+    """Inspect one to six actual G-code layers (1-based), or representative ones.
+
+    Returns a PNG plus the path to an offline interactive viewer of all layers.
+    No installation needed. This is commanded toolpath geometry, not a physical
+    finish simulation. Startup extrusion, travels and firmware macros are excluded.
+    """
+    preview = quality.preview_gcode(gcode, layers=layers, max_segments=max_segments)
+    return [
+        json.dumps(to_jsonable(preview)),
+        Image(data=preview.png_path.read_bytes(), format="png"),
+    ]
+
+
+@server.tool(annotations=SLICING)
+@_tool_errors
+def record_quality_review(
+    report_path: str,
+    variant: str,
+    decision: Literal["accept_with_limitations", "revise"],
+    observations: str,
+    accepted_findings: list[str] | None = None,
+) -> dict[str, Any]:
+    """Record an attestation only after actually viewing the chosen variant's images.
+
+    Describe the inspected surfaces/layers in observations. Acceptance requires
+    explicitly acknowledging every warning and unverified finding code. Detected
+    errors cannot be waived. Changed inputs or previews invalidate the review.
+    This does not certify physical quality or confirm starting a print.
+    """
+    return to_jsonable(
+        quality.record_quality_review(
+            report_path,
+            variant=variant,
+            decision=decision,
+            observations=observations,
+            accepted_findings=accepted_findings,
+        )
+    )
 
 
 def main() -> None:

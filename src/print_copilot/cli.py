@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from print_copilot import __version__, actions, multicolor
+from print_copilot import __version__, actions, multicolor, quality
 from print_copilot.errors import ModelError, PrintCopilotError, SliceError
 from print_copilot.model.orientation import GOALS, OrientationAnalysis, Region
 from print_copilot.model.render import VIEWS
@@ -566,6 +566,76 @@ def cmd_export_project(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_quality(args: argparse.Namespace) -> int:
+    install = selection = None
+    if Path(args.model).suffix.lower() != ".gcode":
+        install, selection = _project_selection(args)
+    elif args.printer or args.process or args.filament:
+        raise quality.QualityError(
+            "Existing G-code uses its own effective config; omit preset choices."
+        )
+    variants = _load_variants(args) if args.variant or args.variants_file else None
+    report = quality.review_print(
+        args.model,
+        install=install,
+        selection=selection,
+        plate=args.plate,
+        mapping=parse_mapping(args.map),
+        reduce_colours=args.reduce_colours,
+        variants=variants,
+        compare=not args.no_compare,
+        work_dir=args.work_dir,
+        timeout_s=args.timeout,
+        max_segments=args.max_segments,
+    )
+    if args.json:
+        _print_json(report)
+    else:
+        print(
+            f"Quality review: {report.status}\nReport: {report.report_path}\n"
+            f"Open: {report.html_path}"
+        )
+        print(f"Candidate for visual review: {report.recommendation}")
+        for variant in report.variants:
+            print(f"\n{variant.label}: {variant.time_s} s, {variant.filament_g} g (slicer)")
+            if variant.error:
+                print(f"  FAILED: {variant.error}")
+            elif variant.audit:
+                for finding in variant.audit.findings:
+                    print(f"  {finding.severity.upper()} [{finding.code}]: {finding.title}")
+        print("Visual review is pending. Physical finish and calibration remain unverified.")
+    return 1 if report.status == "blocked" else 0
+
+
+def cmd_preview(args: argparse.Namespace) -> int:
+    preview = quality.preview_gcode(
+        args.gcode, layers=args.layer, work_dir=args.work_dir, max_segments=args.max_segments
+    )
+    if args.json:
+        _print_json(preview)
+    else:
+        print(
+            f"Selected layers: {preview.layers_shown}\nImage: {preview.png_path}\n"
+            f"All layers: {preview.html_path}"
+        )
+    return 0
+
+
+def cmd_quality_review(args: argparse.Namespace) -> int:
+    receipt = quality.record_quality_review(
+        args.report,
+        variant=args.variant,
+        decision=args.decision,
+        observations=args.observations,
+        accepted_findings=args.accept_finding,
+    )
+    if args.json:
+        _print_json(receipt)
+    else:
+        print(f"{receipt.status}: {receipt.variant}\nHardware quality: {receipt.hardware_quality}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="print-copilot",
@@ -799,6 +869,38 @@ def build_parser() -> argparse.ArgumentParser:
     ep.add_argument("--set", action="append", metavar="KEY=VALUE", help="as for slice")
     ep.add_argument("--open", action="store_true", help="open the written project in the app")
     ep.set_defaults(func=cmd_export_project)
+
+    q = sub.add_parser(
+        "quality",
+        parents=[common, slicing, running, project_opts],
+        help="audit effective settings, slice quality candidates and create visual evidence",
+    )
+    q.add_argument("--no-compare", action="store_true", help="audit only the baseline")
+    q.add_argument("--variant", action="append", help="custom comparison overrides, as for compare")
+    q.add_argument("--variants-file", help="custom variants JSON, as for compare")
+    q.add_argument(
+        "--max-segments", type=int, default=1_000_000, help="explicit preview resource limit"
+    )
+    q.set_defaults(func=cmd_quality)
+
+    pv = sub.add_parser("preview", parents=[common], help="preview actual G-code layers offline")
+    pv.add_argument("gcode", help="sliced G-code file")
+    pv.add_argument("--layer", type=int, action="append", help="layer number (1-based); up to six")
+    pv.add_argument("--work-dir", help="parent folder for preview artifacts")
+    pv.add_argument("--max-segments", type=int, default=1_000_000)
+    pv.set_defaults(func=cmd_preview)
+
+    qr = sub.add_parser("quality-review", parents=[common], help="record an explicit visual review")
+    qr.add_argument("report", help="quality report.json to review")
+    qr.add_argument("--variant", required=True, help="exact variant label from the report")
+    qr.add_argument("--decision", required=True, choices=["accept_with_limitations", "revise"])
+    qr.add_argument(
+        "--observations", required=True, help="what you inspected and observed visually"
+    )
+    qr.add_argument(
+        "--accept-finding", action="append", help="acknowledge a warning/unverified finding code"
+    )
+    qr.set_defaults(func=cmd_quality_review)
     return parser
 
 

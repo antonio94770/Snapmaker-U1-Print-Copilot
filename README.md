@@ -6,9 +6,9 @@ An AI agent (Claude Code, Codex, Claude Desktop, ...) or a person at the
 terminal can list presets, slice a model headlessly and compare the measured
 results.
 
-Status: early development (milestone M4, "U1 specifics"): presets, headless
-slicing, orientation search and multi-colour 3MF projects work; printer
-control is planned, see `HANDOFF.md`.
+Status: early development (M4 plus quality review): presets, headless
+slicing, orientation search, multi-colour 3MF projects and a visual review
+workflow are available; printer control is planned, see `HANDOFF.md`.
 
 To use it from Claude Code, Codex or Claude Desktop, see
 [docs/mcp-setup.md](docs/mcp-setup.md).
@@ -147,6 +147,29 @@ The earlier 0.08 mm strategy comparison predates that fix and has been removed;
 it must be measured again before being used as a performance example.
 Print quality without the prime tower and the firmware's own pre-extrusion
 consumption remain unverified on hardware.
+
+## Quality review before printing
+
+`quality` audits the **effective G-code settings**, renders model and toolpath
+views, and compares the unchanged setup with a finer-layer candidate within
+the machine preset's limits. Every effective parameter is inventoried with
+its actual automatic-check coverage. Unverified calibration and hardware
+conditions stay visible; there is no promise of defect-free prints.
+
+```powershell
+print-copilot quality model.stl
+print-copilot quality painted-project.3mf --plate 1
+print-copilot quality plate_1.gcode
+print-copilot preview plate_1.gcode --layer 1 --layer 50
+```
+
+Open the generated `report.html` to compare measured slicing results and
+inspect all layers in the offline viewer. The initial status is pending visual
+review. `quality-review` records written observations and explicit acceptance
+of remaining findings; changed evidence invalidates the review. It never
+authorizes a physical print. MCP equivalents: `review_print`, `preview_gcode`,
+`record_quality_review`. See [docs/quality-review.md](docs/quality-review.md)
+for the checks, limitations and review procedure.
 
 ## How slicing works
 

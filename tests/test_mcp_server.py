@@ -32,14 +32,19 @@ def test_server_lists_the_tools() -> None:
         "inspect_project",
         "list_presets",
         "optimize_orientation",
+        "preview_gcode",
+        "record_quality_review",
         "render_model",
+        "review_print",
         "slice",
         "slice_project",
     ]
     for tool in tools:
         assert tool.description
         # render_model returns text plus an image, so it has no output schema.
-        assert (tool.output_schema is None) == (tool.name == "render_model")
+        assert (tool.output_schema is None) == (
+            tool.name in {"render_model", "review_print", "preview_gcode"}
+        )
 
 
 def test_list_presets() -> None:
