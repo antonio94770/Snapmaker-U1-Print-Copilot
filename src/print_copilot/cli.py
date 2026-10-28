@@ -3,18 +3,23 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import sys
 from pathlib import Path
 from typing import Any
 
 from print_copilot import __version__, actions, multicolor, quality
-from print_copilot.errors import ModelError, PrintCopilotError, SliceError
+from print_copilot.errors import ConfirmationError, ModelError, PrintCopilotError, SliceError
 from print_copilot.model.orientation import GOALS, OrientationAnalysis, Region
 from print_copilot.model.render import VIEWS
 from print_copilot.orca.install import locate, locate_data_dir
 from print_copilot.orca.presets import DEFAULT_VENDOR, KINDS, PresetLibrary
 from print_copilot.orca.slicer import DEFAULT_TIMEOUT_S, SliceRun
+from print_copilot.printer import actions as printer
+from print_copilot.printer import discovery
+from print_copilot.printer.fake import FakeMoonraker
+from print_copilot.printer.moonraker import ENV_PRINTER_URL, MoonrakerClient
 from print_copilot.serialize import to_jsonable
 
 
@@ -636,6 +641,138 @@ def cmd_quality_review(args: argparse.Namespace) -> int:
     return 0
 
 
+def _client(args: argparse.Namespace) -> MoonrakerClient:
+    return MoonrakerClient(args.printer_url)
+
+
+def cmd_printer_discover(args: argparse.Namespace) -> int:
+    found = discovery.discover(args.timeout)
+    if args.json:
+        _print_json([{**to_jsonable(p), "url": p.url} for p in found])
+        return 0
+    for p in found:
+        print(f"{p.device_name}: {p.machine_type}, firmware {p.firmware_version}, {p.url}")
+    if not found:
+        print("No Snapmaker printer answered on the network.")
+    return 0 if found else 1
+
+
+def cmd_printer_status(args: argparse.Namespace) -> int:
+    status = printer.printer_status(_client(args))
+    if args.json:
+        _print_json(status)
+        return 0
+    print(f"{status.machine_type} at {status.base_url}, firmware {status.firmware_version}")
+    print(f"Klipper: {status.klippy_state} ({status.state_message})")
+    print(
+        f"Print: {status.print_state}"
+        + (f" {status.print_filename}" if status.print_filename else "")
+    )
+    if status.print_state in ("printing", "paused"):
+        print(f"  progress {status.progress:.0%}, {format_duration(int(status.print_duration_s))}")
+    print(f"Bed: {status.bed_temperature_c} / {status.bed_target_c} C")
+    for head in status.heads:
+        spool = head.rfid_filament
+        loaded = (
+            f"{spool.manufacturer} {spool.type} {spool.sub_type} {spool.colour}"
+            if spool
+            else "no RFID spool read"
+        )
+        active = " (active)" if head.object_name == status.active_head else ""
+        print(
+            f"Head {head.index + 1}{active}: {head.temperature_c} / {head.target_c} C, "
+            f"{head.nozzle_diameter_mm} mm nozzle, {loaded}"
+        )
+    print(f"Ready to start a print: {'yes' if status.ready_to_start else 'no'}")
+    return 0
+
+
+def cmd_printer_files(args: argparse.Namespace) -> int:
+    files = printer.list_files(_client(args))
+    if args.json:
+        _print_json(files)
+        return 0
+    for f in files:
+        print(f"{f.name}  ({f.size_bytes / 1e6:.1f} MB)")
+    if not files:
+        print("No G-code files on the printer.")
+    return 0
+
+
+def cmd_printer_upload(args: argparse.Namespace) -> int:
+    result = printer.upload_gcode(_client(args), args.gcode, args.name, overwrite=args.overwrite)
+    if args.json:
+        _print_json(result)
+    else:
+        print(f"Uploaded {result.name} ({result.size_bytes} bytes). Not started.")
+    return 0
+
+
+def _print_plan(plan: printer.StartPlan) -> None:
+    print(f"File: {plan.filename} on {plan.base_url}")
+    print(f"Would send: {plan.request}")
+    if plan.estimated_time_s is not None:
+        print(
+            f"Slicer estimate stored in the file: {format_duration(plan.estimated_time_s)}, "
+            f"{plan.filament_total_g} g"
+        )
+    for head in plan.heads:
+        print(
+            f"  Head {head.index + 1}: needs {head.filament_type} {head.colour or ''} "
+            f"({head.weight_g} g); RFID spool: {head.loaded_type or 'none read'} "
+            f"{head.loaded_colour or ''}"
+        )
+    for check in plan.checks:
+        print(f"  {check.level.upper()}: {check.message}")
+
+
+def cmd_printer_start(args: argparse.Namespace) -> int:
+    client = _client(args)
+    plan = printer.plan_start(client, args.filename)
+    _print_plan(plan)
+    if plan.blocked:
+        print("Blocked: fix the errors above. Nothing was sent.", file=sys.stderr)
+        return 1
+    if args.dry_run:
+        print("Dry run: nothing was sent.")
+        return 0
+    printer.take_plan(plan.token)
+    if args.yes:
+        confirmed_by = "--yes on the command line"
+    else:
+        if not sys.stdin.isatty():
+            raise ConfirmationError("No terminal to confirm in. Pass --yes to confirm explicitly.")
+        answer = input("The printer will heat and move. Type 'start' to send: ")
+        if answer.strip().lower() != "start":
+            print("Not confirmed. Nothing was sent.")
+            return 1
+        confirmed_by = "typed confirmation"
+    sent = printer.execute_start(client, plan, confirmed_by=confirmed_by)
+    print(f"Sent: {sent.request}")
+    return 0
+
+
+def cmd_printer_cancel(args: argparse.Namespace) -> int:
+    sent = printer.cancel_print(_client(args))
+    print(f"Sent: {sent.request}")
+    return 0
+
+
+def cmd_printer_heaters_off(args: argparse.Namespace) -> int:
+    sent = printer.heaters_off(_client(args))
+    print(f"Sent: {sent.request}")
+    return 0
+
+
+def cmd_printer_fake(args: argparse.Namespace) -> int:
+    fake = FakeMoonraker(port=args.port)
+    print(f"Fake U1 Moonraker at {fake.url} (Ctrl+C to stop). Nothing reaches a printer.")
+    print(f"Use it with: --printer-url {fake.url}")
+    with contextlib.suppress(KeyboardInterrupt):
+        fake.serve_forever()
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="print-copilot",
@@ -901,6 +1038,42 @@ def build_parser() -> argparse.ArgumentParser:
         "--accept-finding", action="append", help="acknowledge a warning/unverified finding code"
     )
     qr.set_defaults(func=cmd_quality_review)
+
+    pr = sub.add_parser("printer", help="talk to the U1 through Moonraker")
+    psub = pr.add_subparsers(dest="printer_command", required=True)
+    net = argparse.ArgumentParser(add_help=False)
+    net.add_argument(
+        "--printer-url",
+        help=f"printer address (or {ENV_PRINTER_URL}); default: find the U1 through mDNS",
+    )
+    net.add_argument("--json", action="store_true", help="print JSON instead of text")
+    pd = psub.add_parser("discover", help="list Snapmaker printers answering on the network")
+    pd.add_argument("--timeout", type=float, default=discovery.DEFAULT_TIMEOUT_S, help="seconds")
+    pd.add_argument("--json", action="store_true", help="print JSON instead of text")
+    pd.set_defaults(func=cmd_printer_discover)
+    ps = psub.add_parser("status", parents=[net], help="state, temperatures, heads and spools")
+    ps.set_defaults(func=cmd_printer_status)
+    pf = psub.add_parser("files", parents=[net], help="G-code files stored on the printer")
+    pf.set_defaults(func=cmd_printer_files)
+    pu = psub.add_parser("upload", parents=[net], help="copy a G-code file; never starts it")
+    pu.add_argument("gcode", help="G-code sliced for the Snapmaker U1")
+    pu.add_argument("--name", help="file name on the printer (default: local name)")
+    pu.add_argument("--overwrite", action="store_true", help="replace a file of the same name")
+    pu.set_defaults(func=cmd_printer_upload)
+    pst = psub.add_parser(
+        "start", parents=[net], help="start a stored file after showing the plan and confirming"
+    )
+    pst.add_argument("filename", help="file name on the printer")
+    pst.add_argument("--dry-run", action="store_true", help="show the plan only")
+    pst.add_argument("--yes", action="store_true", help="confirm without the typed prompt")
+    pst.set_defaults(func=cmd_printer_start)
+    pc = psub.add_parser("cancel", parents=[net], help="cancel the running print (not gated)")
+    pc.set_defaults(func=cmd_printer_cancel)
+    ph = psub.add_parser("heaters-off", parents=[net], help="turn every heater off (not gated)")
+    ph.set_defaults(func=cmd_printer_heaters_off)
+    pk = psub.add_parser("fake", help="run a fake U1 Moonraker on this computer")
+    pk.add_argument("--port", type=int, default=7125, help="port on 127.0.0.1 (default 7125)")
+    pk.set_defaults(func=cmd_printer_fake)
     return parser
 
 

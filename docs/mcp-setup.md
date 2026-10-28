@@ -24,6 +24,8 @@ Optional environment variables (the same ones the CLI reads):
 | `PRINT_COPILOT_ORCA_EXE` | `C:\Program Files\Snapmaker_Orca\snapmaker-orca.exe` | Snapmaker Orca executable |
 | `PRINT_COPILOT_ORCA_DATA` | `%APPDATA%\Snapmaker_Orca` | Snapmaker Orca presets and `Snapmaker_Orca.conf` |
 | `PRINT_COPILOT_WORK_DIR` | `%LOCALAPPDATA%\print-copilot\runs` | where each slice gets its run folder |
+| `PRINT_COPILOT_PRINTER_URL` | found through mDNS | fixed printer address, e.g. `http://192.168.1.50`; only needed when discovery does not work on your network |
+| `PRINT_COPILOT_PRINTER_NAME` | none | device name of the U1 to use when several answer |
 
 ## 2. Tools
 
@@ -41,7 +43,23 @@ Optional environment variables (the same ones the CLI reads):
 | `compare_strategies` | slices one plate with the prime tower on/off and one object at a time, and compares the measured results | `print-copilot strategies` |
 | `export_project` | writes the plate as a new 3MF for Snapmaker Orca with the U1 presets and heads, and can open it in the app | `print-copilot export-project` |
 
-None of these tools talk to the printer. Overrides use preset JSON keys
+Printer tools (Moonraker on the U1; the printer is found on the network through
+mDNS, once per server process, and found again if it stops answering):
+
+| Tool | What it does | CLI equivalent |
+| --- | --- | --- |
+| `discover_printers` | Snapmaker printers answering on the LAN, with their current address | `print-copilot printer discover` |
+| `printer_status` | state, temperatures, active head, and the spool each head's RFID reader identified | `print-copilot printer status` |
+| `list_printer_files` | G-code files stored on the printer | `print-copilot printer files` |
+| `upload_to_printer` | copies a G-code file sliced for the U1; refuses other printers and overwrites; never starts it | `print-copilot printer upload` |
+| `plan_print_start` | sends nothing: returns the exact start request, the file's slicer figures, per-head checks and a one-time token | `print-copilot printer start --dry-run` |
+| `start_print` | starts a planned file; asks the user again through MCP elicitation when the client supports it | `print-copilot printer start` (typed confirmation) |
+| `cancel_print`, `heaters_off` | safety actions, never gated | `print-copilot printer cancel`, `printer heaters-off` |
+
+Without a printer, `print-copilot printer fake` runs a fake U1 Moonraker on
+`http://127.0.0.1:7125`; point `PRINT_COPILOT_PRINTER_URL` at it.
+
+The slicing and project tools never talk to the printer. Overrides use preset JSON keys
 (`sparse_infill_density`, `wall_loops`, ...). A key without a prefix is a
 process setting; `machine.<key>` and `filament.<key>` target the machine and
 filament presets (filament overrides apply to every head). Keys the preset does

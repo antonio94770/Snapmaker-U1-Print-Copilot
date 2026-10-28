@@ -6,8 +6,12 @@ error is passed to the client as a tool error carrying the full reason.
 
 Locations come from the same environment variables as the CLI:
 `PRINT_COPILOT_ORCA_EXE`, `PRINT_COPILOT_ORCA_DATA`, `PRINT_COPILOT_WORK_DIR`.
+Printer tools find the U1 through mDNS unless `PRINT_COPILOT_PRINTER_URL` is
+set (`PRINT_COPILOT_PRINTER_NAME` picks one of several U1 printers).
 
-None of these tools touch the printer.
+Printer tools read status freely. start_print is gated: it needs the token of a
+plan from plan_print_start, and asks the user through MCP elicitation when the
+client supports it. cancel_print and heaters_off are never gated.
 """
 
 from __future__ import annotations
@@ -18,17 +22,25 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Literal, ParamSpec, TypeVar
 
-from mcp.server.mcpserver import Image, MCPServer
+from mcp.server.mcpserver import Context, Image, MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
-from mcp.types import ToolAnnotations
+from mcp.types import (
+    ClientCapabilities,
+    ElicitationCapability,
+    FormElicitationCapability,
+    ToolAnnotations,
+)
 from pydantic import BaseModel, Field
 
 from print_copilot import __version__, actions, multicolor, quality
-from print_copilot.errors import PrintCopilotError
+from print_copilot.errors import ConfirmationError, PrintCopilotError
 from print_copilot.model.orientation import Region
 from print_copilot.orca.install import locate, locate_data_dir
 from print_copilot.orca.presets import PresetLibrary
 from print_copilot.orca.slicer import OverrideValue
+from print_copilot.printer import actions as printer
+from print_copilot.printer import discovery
+from print_copilot.printer.moonraker import MoonrakerClient
 from print_copilot.serialize import to_jsonable
 
 P = ParamSpec("P")
@@ -64,7 +76,17 @@ compare_strategies tries the prime tower off and one object at a time;
 export_project writes the plate as a new project for the app and can open it.
 On the U1 the purge matrix has no effect: what costs time and material is the
 number of tool changes and the prime tower. If the plate's colours are not the
-loaded ones, tell the user which filament to load on which head."""
+loaded ones, tell the user which filament to load on which head.
+Printer (Moonraker; the U1 is found on the network automatically, and
+discover_printers lists what answered): printer_status shows state,
+temperatures and the spool each head's RFID reader identified;
+list_printer_files lists stored G-code. upload_to_printer copies a sliced U1
+G-code file to the printer and never starts it. To start, call
+plan_print_start, show the user the plan (file, request, per-head checks)
+and call start_print with its token only after the user explicitly says to
+start that file. A quality review, an upload or a paired printer is not
+consent. Never start a print on your own initiative. cancel_print and
+heaters_off are safety actions and need no confirmation."""
 
 server = MCPServer(name="snapmaker-print-copilot", version=__version__, instructions=INSTRUCTIONS)
 
@@ -72,6 +94,13 @@ READ_ONLY = ToolAnnotations(read_only_hint=True, open_world_hint=False)
 # Slicing writes only a new run folder under the work dir.
 SLICING = ToolAnnotations(
     read_only_hint=False, destructive_hint=False, idempotent_hint=True, open_world_hint=False
+)
+PRINTER_READ = ToolAnnotations(read_only_hint=True, open_world_hint=True)
+PRINTER_UPLOAD = ToolAnnotations(
+    read_only_hint=False, destructive_hint=False, idempotent_hint=False, open_world_hint=True
+)
+PRINTER_ACTION = ToolAnnotations(
+    read_only_hint=False, destructive_hint=True, idempotent_hint=False, open_world_hint=True
 )
 
 
@@ -642,6 +671,133 @@ def record_quality_review(
             accepted_findings=accepted_findings,
         )
     )
+
+
+@server.tool(annotations=PRINTER_READ)
+@_tool_errors
+def discover_printers() -> list[dict[str, Any]]:
+    """List Snapmaker printers that answer on the LAN (mDNS), with their current address.
+
+    The printer tools use the single U1 found this way unless
+    PRINT_COPILOT_PRINTER_URL is set.
+    """
+    return [{**to_jsonable(p), "url": p.url} for p in discovery.discover()]
+
+
+@server.tool(annotations=PRINTER_READ)
+@_tool_errors
+def printer_status() -> dict[str, Any]:
+    """Read the U1's state: Klipper and print state, bed and head temperatures,
+    which head is active, and the spool each head's RFID reader identified
+    (heads without a tag show none; that does not mean they are empty)."""
+    status = printer.printer_status(MoonrakerClient())
+    data = to_jsonable(status)
+    data["ready_to_start"] = status.ready_to_start
+    return data
+
+
+@server.tool(annotations=PRINTER_READ)
+@_tool_errors
+def list_printer_files() -> list[dict[str, Any]]:
+    """List the G-code files stored on the printer, newest first."""
+    return to_jsonable(printer.list_files(MoonrakerClient()))
+
+
+@server.tool(annotations=PRINTER_UPLOAD)
+@_tool_errors
+def upload_to_printer(
+    gcode: str, name: str | None = None, overwrite: bool = False
+) -> dict[str, Any]:
+    """Copy a sliced G-code file into the printer's storage. Never starts a print.
+
+    gcode: absolute path of a .gcode sliced by Snapmaker Orca for the U1
+    (checked through its printer_model). name: file name on the printer
+    (default: the local name). overwrite: replace a file of the same name;
+    only when the user asked for it.
+    """
+    return to_jsonable(printer.upload_gcode(MoonrakerClient(), gcode, name, overwrite=overwrite))
+
+
+@server.tool(annotations=PRINTER_READ)
+@_tool_errors
+def plan_print_start(filename: str) -> dict[str, Any]:
+    """Prepare starting a file already on the printer. Sends nothing.
+
+    Returns the exact request start_print would send, the slicer's figures
+    stored in the file, the filament each used head needs next to the RFID
+    spool it holds, and checks (errors block the start). Show all of it to the
+    user. The token works once, for 10 minutes, and only if neither the file
+    nor the printer state changes.
+    """
+    plan = printer.plan_start(MoonrakerClient(), filename)
+    data = to_jsonable(plan)
+    data["blocked"] = plan.blocked
+    if plan.blocked:
+        data["token"] = None
+        data["note"] = "Blocked by the errors in checks; nothing can be started."
+    return data
+
+
+class StartConfirmation(BaseModel):
+    start: bool = Field(description="Start this print on the printer now")
+
+
+def _can_elicit(ctx: Context) -> bool:
+    wanted = ClientCapabilities(elicitation=ElicitationCapability(form=FormElicitationCapability()))
+    try:
+        return ctx.request_context.session.check_client_capability(wanted)
+    except (AttributeError, LookupError, ValueError):
+        return False
+
+
+def _confirmation_message(plan: printer.StartPlan) -> str:
+    lines = [f"Start {plan.filename} on {plan.base_url}?", f"Request: {plan.request}"]
+    if plan.estimated_time_s is not None:
+        lines.append(f"Slicer estimate: {plan.estimated_time_s} s, {plan.filament_total_g} g")
+    for head in plan.heads:
+        lines.append(
+            f"Head {head.index + 1}: needs {head.filament_type} {head.colour or ''} "
+            f"({head.weight_g} g), RFID spool: {head.loaded_type or 'none read'}"
+        )
+    lines += [f"{c.level.upper()}: {c.message}" for c in plan.checks]
+    return "\n".join(lines)
+
+
+@server.tool(annotations=PRINTER_ACTION)
+async def start_print(confirmation_token: str, ctx: Context) -> dict[str, Any]:
+    """Start a print planned by plan_print_start. PHYSICAL ACTION: the printer heats and moves.
+
+    Call only after the user explicitly confirmed starting that file. When the
+    client supports elicitation the user is asked again here; a decline sends
+    nothing. The file and printer state are re-checked before sending.
+    """
+    try:
+        plan = printer.take_plan(confirmation_token)
+        confirmed_by = "plan token (client without elicitation)"
+        if _can_elicit(ctx):
+            answer = await ctx.elicit(_confirmation_message(plan), StartConfirmation)
+            if answer.action != "accept" or not answer.data.start:
+                raise ConfirmationError("The user did not confirm the start; nothing was sent.")
+            confirmed_by = "user via MCP elicitation"
+        return to_jsonable(
+            printer.execute_start(MoonrakerClient(), plan, confirmed_by=confirmed_by)
+        )
+    except PrintCopilotError as exc:
+        raise ToolError(str(exc)) from exc
+
+
+@server.tool(annotations=PRINTER_ACTION)
+@_tool_errors
+def cancel_print() -> dict[str, Any]:
+    """Cancel the running print (Klipper CANCEL_PRINT). Safety action, never gated."""
+    return to_jsonable(printer.cancel_print(MoonrakerClient()))
+
+
+@server.tool(annotations=PRINTER_ACTION)
+@_tool_errors
+def heaters_off() -> dict[str, Any]:
+    """Turn every heater off (TURN_OFF_HEATERS). Safety action, never gated."""
+    return to_jsonable(printer.heaters_off(MoonrakerClient()))
 
 
 def main() -> None:

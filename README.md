@@ -6,9 +6,10 @@ An AI agent (Claude Code, Codex, Claude Desktop, ...) or a person at the
 terminal can list presets, slice a model headlessly and compare the measured
 results.
 
-Status: early development (M4 plus quality review): presets, headless
-slicing, orientation search, multi-colour 3MF projects and a visual review
-workflow are available; printer control is planned, see `HANDOFF.md`.
+Status: early development (M5): presets, headless slicing, orientation
+search, multi-colour 3MF projects, a visual review workflow and printer access
+through Moonraker are available. Printer status is verified on a U1; upload
+and print start are not yet tried on hardware, see `HANDOFF.md`.
 
 To use it from Claude Code, Codex or Claude Desktop, see
 [docs/mcp-setup.md](docs/mcp-setup.md).
@@ -170,6 +171,29 @@ of remaining findings; changed evidence invalidates the review. It never
 authorizes a physical print. MCP equivalents: `review_print`, `preview_gcode`,
 `record_quality_review`. See [docs/quality-review.md](docs/quality-review.md)
 for the checks, limitations and review procedure.
+
+## Printer (Moonraker)
+
+The U1 runs Moonraker on the LAN (port 80 and 7125, no login) and announces
+itself over mDNS, so its address is found on every run and never stored.
+`printer discover` lists what answered; `--printer-url` or
+`PRINT_COPILOT_PRINTER_URL` overrides discovery, and `PRINT_COPILOT_PRINTER_NAME`
+picks one of several U1 printers by device name:
+
+```bash
+print-copilot printer discover
+print-copilot printer status
+print-copilot printer upload part.gcode
+print-copilot printer start part.gcode --dry-run
+```
+
+`status` shows the state, temperatures and, per head, the spool its RFID
+reader identified. `upload` only copies G-code sliced for the U1 and never
+starts it. `start` first prints the plan (the exact request, the slicer's
+time and grams stored in the file, per-head checks against nozzle and RFID
+spools) and sends only after you type `start` (or pass `--yes`); `--dry-run`
+sends nothing. `cancel` and `heaters-off` are never gated. Without a printer,
+`print-copilot printer fake` runs a fake U1 Moonraker on this computer.
 
 ## How slicing works
 

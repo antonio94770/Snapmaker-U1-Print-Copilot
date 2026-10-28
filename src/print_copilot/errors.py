@@ -27,3 +27,11 @@ class ModelError(PrintCopilotError):
 
 class ConfError(PrintCopilotError):
     """`Snapmaker_Orca.conf` is missing, unreadable or lacks the expected keys."""
+
+
+class PrinterError(PrintCopilotError):
+    """The printer cannot be reached, refused a request or returned unusable data."""
+
+
+class ConfirmationError(PrintCopilotError):
+    """A gated printer action was not confirmed, or its plan is stale or unknown."""
