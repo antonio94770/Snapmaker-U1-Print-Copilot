@@ -15,7 +15,7 @@ To use it from Claude Code, Codex or Claude Desktop, see
 
 ## Requirements
 
-- Windows with Snapmaker Orca installed (verified with 01.10.01.50 at
+- Windows with Snapmaker Orca installed (verified with 01.10.01.50 and 2.4.1 at
   `C:\Program Files\Snapmaker_Orca\`) and started at least once, so that
   `%APPDATA%\Snapmaker_Orca` exists.
 - Python 3.11 or newer.
@@ -41,8 +41,11 @@ Slice a model. Give one `--filament` per tool head (T0..T3), or a single one to
 use it on every head:
 
 ```bash
-print-copilot slice research/cli-probe/cube.stl --printer "Snapmaker U1 (0.4 nozzle)" --process "0.20mm Standard @Snapmaker U1 (0.4 nozzle)" --filament "Generic PLA"
+print-copilot slice research/cli-probe/cube.stl --printer "Snapmaker U1 (0.4 nozzle)" --process "0.20mm High Quality @Snapmaker U1 (0.4 nozzle)" --filament "Generic PLA"
 ```
+
+The command above uses the bundled 2.4.1 process name. On 01.10.01.50 the
+0.20 mm process was named `Standard`; use `presets` to check your installed names.
 
 Without `--printer`, `--process` or `--filament`, the selection stored in
 Snapmaker Orca is used (a note says so). Override settings for one run with
@@ -160,13 +163,19 @@ The Snapmaker Orca command line needs a few workarounds, found by testing
 - the output folder must stay within 229 characters, or the CLI cannot write
   the G-code;
 - 3MF projects are sliced from a copy without plates and without the
-  `Application` tag (the 01.10.01.50 CLI crashes on both), with the objects
-  of one plate centred on the bed and `--arrange 0`;
+  `Application` tag, with the objects of one plate centred on the bed and
+  `--arrange 0`. The plate-only crash is fixed in 2.4.1, but partial project
+  metadata can still crash it and a full project probe silently disabled the
+  prime tower. The copy workaround remains necessary;
 - each head's colour is passed in its filament preset, otherwise the slicer
   drops painted colours;
 - if the prime tower collides with an object, it is moved to a free corner
   and a note says so.
 
+System presets are read from the user data's `system` folder when present;
+otherwise they are read from `resources/profiles` beside the selected executable
+(verified with Windows 2.4.1). User presets and selections still come from
+`%APPDATA%\Snapmaker_Orca`. Preset names are never substituted automatically.
 Your Snapmaker Orca installation and presets are only read, never modified.
 
 ## Development

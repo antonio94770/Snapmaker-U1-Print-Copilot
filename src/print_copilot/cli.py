@@ -18,6 +18,14 @@ from print_copilot.orca.slicer import DEFAULT_TIMEOUT_S, SliceRun
 from print_copilot.serialize import to_jsonable
 
 
+def _preset_library(args) -> PresetLibrary:
+    data = locate_data_dir(args.orca_data)
+    if (data / "system").is_dir():
+        return PresetLibrary(data, vendor=args.vendor)
+    install = locate(exe=args.orca_exe, data_dir=data)
+    return PresetLibrary(data, vendor=args.vendor, system_dir=install.system_dir)
+
+
 def _print_json(value: Any) -> None:
     json.dump(to_jsonable(value), sys.stdout, indent=2, ensure_ascii=False)
     sys.stdout.write("\n")
@@ -34,7 +42,7 @@ def format_duration(seconds: int) -> str:
 
 
 def cmd_presets(args: argparse.Namespace) -> int:
-    library = PresetLibrary(locate_data_dir(args.orca_data), vendor=args.vendor)
+    library = _preset_library(args)
     catalog = actions.list_presets(
         library,
         args.kind,
@@ -123,7 +131,7 @@ def _print_slice(run: SliceRun) -> None:
 
 def cmd_slice(args: argparse.Namespace) -> int:
     install = locate(args.orca_exe, args.orca_data)
-    library = PresetLibrary(install.data_dir, vendor=args.vendor)
+    library = PresetLibrary(install.data_dir, vendor=args.vendor, system_dir=install.system_dir)
     overrides = parse_assignments(args.set)
     selection = _selection(args, library)
     run = actions.run_slice(
@@ -187,7 +195,7 @@ def _print_comparison(comparison: actions.Comparison) -> None:
 
 def cmd_compare(args: argparse.Namespace) -> int:
     install = locate(args.orca_exe, args.orca_data)
-    library = PresetLibrary(install.data_dir, vendor=args.vendor)
+    library = PresetLibrary(install.data_dir, vendor=args.vendor, system_dir=install.system_dir)
     variants = _load_variants(args)
     selection = _selection(args, library)
     comparison = actions.compare_variants(
@@ -293,7 +301,7 @@ def _print_analysis(analysis: OrientationAnalysis) -> None:
 def cmd_analyze(args: argparse.Namespace) -> int:
     selection = None
     if not args.no_presets:
-        library = PresetLibrary(locate_data_dir(args.orca_data), vendor=args.vendor)
+        library = _preset_library(args)
         selection = _selection(args, library)
     analysis = actions.analyze_model(
         args.model,
@@ -338,7 +346,7 @@ def _print_orientation_report(report: actions.OrientationReport) -> None:
 
 def cmd_orient(args: argparse.Namespace) -> int:
     install = locate(args.orca_exe, args.orca_data)
-    library = PresetLibrary(install.data_dir, vendor=args.vendor)
+    library = PresetLibrary(install.data_dir, vendor=args.vendor, system_dir=install.system_dir)
     regions = parse_regions(args.protect)
     selection = _selection(args, library)
     report = actions.optimize_orientation(
@@ -363,7 +371,7 @@ def cmd_orient(args: argparse.Namespace) -> int:
 def cmd_render(args: argparse.Namespace) -> int:
     selection = None
     if not args.no_presets:
-        library = PresetLibrary(locate_data_dir(args.orca_data), vendor=args.vendor)
+        library = _preset_library(args)
         selection = _selection(args, library)
     result = actions.render_model(
         args.model,
@@ -404,7 +412,7 @@ def parse_mapping(items: list[str] | None) -> dict[int, int] | None:
 
 def _project_selection(args: argparse.Namespace) -> tuple[Any, actions.Selection]:
     install = locate(args.orca_exe, args.orca_data)
-    library = PresetLibrary(install.data_dir, vendor=args.vendor)
+    library = PresetLibrary(install.data_dir, vendor=args.vendor, system_dir=install.system_dir)
     return install, _selection(args, library)
 
 
@@ -566,6 +574,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument("--orca-data", help="Snapmaker Orca data dir (default %%APPDATA%%)")
+    common.add_argument("--orca-exe", help="path to snapmaker-orca.exe")
     common.add_argument(
         "--vendor",
         default=DEFAULT_VENDOR,
@@ -617,7 +626,6 @@ def build_parser() -> argparse.ArgumentParser:
         "every head; default: the ones stored in Snapmaker Orca for the printer)",
     )
     running = argparse.ArgumentParser(add_help=False)
-    running.add_argument("--orca-exe", help="path to snapmaker-orca.exe")
     running.add_argument("--work-dir", help="parent folder for run directories")
     running.add_argument(
         "--timeout", type=float, default=DEFAULT_TIMEOUT_S, help="slicer timeout in seconds"
@@ -755,7 +763,6 @@ def build_parser() -> argparse.ArgumentParser:
         parents=[common, slicing, project_opts],
         help="show plates, objects and filaments of a 3MF project and the proposed tool heads",
     )
-    pj.add_argument("--orca-exe", help="path to snapmaker-orca.exe")
     pj.add_argument(
         "--no-presets", action="store_true", help="do not read Snapmaker Orca (no head proposal)"
     )

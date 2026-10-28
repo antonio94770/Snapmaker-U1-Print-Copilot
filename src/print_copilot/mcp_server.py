@@ -68,6 +68,14 @@ SLICING = ToolAnnotations(
 )
 
 
+def _preset_library() -> PresetLibrary:
+    data = locate_data_dir()
+    if (data / "system").is_dir():
+        return PresetLibrary(data)
+    install = locate(data_dir=data)
+    return PresetLibrary(data, system_dir=install.system_dir)
+
+
 def _tool_errors(fn: Callable[P, R]) -> Callable[P, R]:
     """Turn Print Copilot errors into MCP tool errors with the same message."""
 
@@ -107,7 +115,7 @@ def list_presets(
     include_abstract: also list base presets the app hides.
     all_vendors: include presets of every vendor folder, not only Snapmaker.
     """
-    library = PresetLibrary(locate_data_dir())
+    library = _preset_library()
     catalog = actions.list_presets(
         library,
         kind,
@@ -156,7 +164,10 @@ def slice(
     """
     install = locate()
     selection = actions.select_presets(
-        PresetLibrary(install.data_dir), printer=printer, process=process, filaments=filaments
+        PresetLibrary(install.data_dir, system_dir=install.system_dir),
+        printer=printer,
+        process=process,
+        filaments=filaments,
     )
     run = actions.run_slice(install, model, selection, overrides=overrides)
     data = to_jsonable(run)
@@ -183,7 +194,10 @@ def compare_variants(
     """
     install = locate()
     selection = actions.select_presets(
-        PresetLibrary(install.data_dir), printer=printer, process=process, filaments=filaments
+        PresetLibrary(install.data_dir, system_dir=install.system_dir),
+        printer=printer,
+        process=process,
+        filaments=filaments,
     )
     specs = [actions.Variant(overrides=dict(v.overrides), label=v.label) for v in variants]
     return to_jsonable(actions.compare_variants(install, model, selection, specs))
@@ -240,9 +254,7 @@ def analyze_model(
     rotation_matrix, height, bed contact, overhang, support volume, stair area
     and the protected-surface versions of those areas.
     """
-    selection = actions.select_presets(
-        PresetLibrary(locate_data_dir()), printer=printer, process=process
-    )
+    selection = actions.select_presets(_preset_library(), printer=printer, process=process)
     analysis = actions.analyze_model(
         model,
         selection=selection,
@@ -283,7 +295,10 @@ def optimize_orientation(
     """
     install = locate()
     selection = actions.select_presets(
-        PresetLibrary(install.data_dir), printer=printer, process=process, filaments=filaments
+        PresetLibrary(install.data_dir, system_dir=install.system_dir),
+        printer=printer,
+        process=process,
+        filaments=filaments,
     )
     report = actions.optimize_orientation(
         install,
@@ -332,9 +347,7 @@ def render_model(
     Returns a JSON description (pixel to mm mapping of every view, legend,
     highlighted areas, PNG path) followed by the image.
     """
-    selection = actions.select_presets(
-        PresetLibrary(locate_data_dir()), printer=printer, process=process
-    )
+    selection = actions.select_presets(_preset_library(), printer=printer, process=process)
     result = actions.render_model(
         model,
         down_vector=down_vector,
@@ -354,7 +367,10 @@ def _project_selection(
 ) -> tuple[Any, actions.Selection]:
     install = locate()
     selection = actions.select_presets(
-        PresetLibrary(install.data_dir), printer=printer, process=process, filaments=filaments
+        PresetLibrary(install.data_dir, system_dir=install.system_dir),
+        printer=printer,
+        process=process,
+        filaments=filaments,
     )
     return install, selection
 

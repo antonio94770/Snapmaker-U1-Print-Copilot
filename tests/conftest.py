@@ -99,3 +99,21 @@ def model(tmp_path: Path) -> Path:
     path = tmp_path / "cube.stl"
     path.write_text("solid cube\nendsolid cube\n")
     return path
+
+
+@pytest.fixture(scope="module")
+def real_process_name(real_install):
+    """Select the explicit 0.20 mm reference process for each verified release.
+
+    01.10.01.50 shipped Standard; Windows 2.4.1 ships High Quality instead.
+    This is test setup only; product actions never substitute preset names.
+    """
+    library = PresetLibrary(real_install.data_dir, system_dir=real_install.system_dir)
+    names = {p.name for p in library.list_presets("process").presets}
+    for name in (
+        "0.20mm Standard @Snapmaker U1 (0.4 nozzle)",
+        "0.20mm High Quality @Snapmaker U1 (0.4 nozzle)",
+    ):
+        if name in names:
+            return name
+    pytest.fail("Installed Orca has neither verified U1 0.20 mm reference process")

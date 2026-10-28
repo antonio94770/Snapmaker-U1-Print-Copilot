@@ -37,9 +37,12 @@ def real_install():
 
 
 @pytest.fixture(scope="module")
-def selection(real_install):
+def selection(real_install, real_process_name):
     chosen = select_presets(
-        PresetLibrary(real_install.data_dir), printer=U1, process=PROCESS, filaments=["Generic PLA"]
+        PresetLibrary(real_install.data_dir, system_dir=real_install.system_dir),
+        printer=U1,
+        process=real_process_name,
+        filaments=["Generic PLA"],
     )
     chosen.colours = list(HEAD_COLOURS)
     return chosen
@@ -117,10 +120,13 @@ def test_spiderman_identical_colours_share_heads(real_install, selection, work) 
 
 
 @pytest.mark.integration
-def test_nx01_plate4_moves_the_prime_tower(real_install, selection, work) -> None:
+def test_nx01_plate4_slices_with_prime_tower(real_install, selection, work) -> None:
     path = downloaded("nx01.3mf")
     result = multicolor.slice_project(real_install, path, selection, plate=4, work_dir=work)
-    assert any("prime tower collided" in n for n in result.notes)
+    # Old presets collided at the default tower position and triggered a retry.
+    # With bundled 2.4.1 presets the same plate slices without relocation.
+    # Retry behaviour is covered independently in test_multicolor.py.
+    assert result.prime_tower_g > 0
     assert result.total_filament_g > 50
 
 

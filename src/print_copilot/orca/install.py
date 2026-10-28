@@ -47,7 +47,17 @@ class OrcaInstall:
 
     @property
     def system_dir(self) -> Path:
-        return self.data_dir / "system"
+        legacy = self.data_dir / "system"
+        if legacy.is_dir():
+            return legacy
+        # Verified with the installed Windows 2.4.1 release: system presets
+        # ship in resources/profiles; user data contains only config + user.
+        bundled = self.exe.parent / "resources" / "profiles"
+        if bundled.is_dir():
+            return bundled
+        raise OrcaNotFoundError(
+            f"No system presets at {legacy} or {bundled}. Check the selected Orca installation."
+        )
 
     @property
     def user_dir(self) -> Path:
@@ -79,9 +89,11 @@ def locate_data_dir(data_dir: str | os.PathLike[str] | None = None) -> Path:
             f"Pass --orca-data or set {ENV_DATA_DIR}."
         )
     path = to_windows_path(candidate)
-    if not (path / "system").is_dir():
+    has_user_data = (path / "user").is_dir() and (path / "Snapmaker_Orca.conf").is_file()
+    if not (path / "system").is_dir() and not has_user_data:
         raise OrcaNotFoundError(
-            f"No Snapmaker Orca data directory at {path} (missing 'system' folder). "
+            f"No Snapmaker Orca data directory at {path} (missing 'system' folder "
+            "or user data with Snapmaker_Orca.conf). "
             f"Start Snapmaker Orca once, or pass --orca-data / set {ENV_DATA_DIR}."
         )
     return path

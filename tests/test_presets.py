@@ -99,3 +99,17 @@ def test_invalid_json_is_ignored(library: PresetLibrary) -> None:
 def test_missing_system_folder_fails(tmp_path) -> None:
     with pytest.raises(PresetError, match="No system presets folder"):
         PresetLibrary(tmp_path)
+
+
+def test_bundled_system_presets_keep_user_inheritance(orca_data, tmp_path) -> None:
+    import shutil
+
+    bundled = tmp_path / "profiles"
+    data = tmp_path / "data"
+    shutil.copytree(orca_data / "system", bundled)
+    shutil.copytree(orca_data / "user", data / "user")
+    library = PresetLibrary(data, system_dir=bundled)
+    filament = library.resolve("filament", "My PLA")
+    assert filament.settings["nozzle_temperature"] == ["215"]
+    assert filament.ref.source == "user"
+    assert library.resolve("machine", U1).ref.path.is_relative_to(bundled)

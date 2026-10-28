@@ -9,7 +9,8 @@ Each run gets a fresh directory that keeps everything needed to reproduce it:
     <run_dir>/out/plate_1.gcode                              slicer output
 
 The CLI workarounds below were all verified on Snapmaker Orca 01.10.01.50
-(HANDOFF.md section 4). Re-verify them on every new Snapmaker Orca release.
+and rechecked on installed Windows 2.4.1 (HANDOFF.md sections 4 and 4c).
+Re-verify them on every new Snapmaker Orca release.
 """
 
 from __future__ import annotations

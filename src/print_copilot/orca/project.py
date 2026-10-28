@@ -31,6 +31,11 @@ Snapmaker Orca CLI on 01.10.01.50 (all verified, HANDOFF.md section 4):
   presets ("Param values in 3mf/config error" with a Bambu project), so it is
   left out and the presets come from the command line.
 
+Installed Windows 2.4.1 recheck (HANDOFF.md section 4c): the plate-only crash
+is fixed, but an Application-only project still crashes. A complete generated
+project loads with the prime tower silently disabled, so the copy workaround
+is retained to preserve the settings sent by the caller.
+
 `write_slicing_copy` therefore writes a copy without the `Application`
 metadata, without plates and without any other `Metadata/` file, keeping only
 the objects of one plate, moved to the centre of the bed.

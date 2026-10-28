@@ -1,0 +1,426 @@
+[
+  {
+    "probe": "painted-bottom-colours",
+    "output_dir_chars": 102,
+    "exit_code": 0,
+    "gcode_count": 1,
+    "exports": [],
+    "tool_changes": 3,
+    "generator": "Snapmaker Orca 2.4.1",
+    "time_s": 773,
+    "filament_g": 2.38,
+    "filament_per_head_g": [
+      2.12,
+      0.26,
+      0.0,
+      0.0
+    ],
+    "config": {
+      "enable_prime_tower": "1",
+      "support_type": "tree(auto)",
+      "wipe_tower_filament": "0",
+      "filament_colour": "#FFFFFF;#000000;#F4E2C1;#ED1C24",
+      "flush_volumes_matrix": "0,223,203,361,703,0,684,545,288,245,0,324,673,231,602,0",
+      "prime_volume": "45"
+    }
+  },
+  {
+    "probe": "painted-bottom-no-colours",
+    "output_dir_chars": 105,
+    "exit_code": 0,
+    "gcode_count": 1,
+    "exports": [],
+    "tool_changes": 0,
+    "generator": "Snapmaker Orca 2.4.1",
+    "time_s": 667,
+    "filament_g": 1.82,
+    "filament_per_head_g": [
+      1.82,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "config": {
+      "enable_prime_tower": "1",
+      "support_type": "tree(auto)",
+      "wipe_tower_filament": "0",
+      "filament_colour": "#F2754E",
+      "flush_volumes_matrix": "0,280,280,280,280,0,280,280,280,280,0,280,280,280,280,0",
+      "prime_volume": "45"
+    }
+  },
+  {
+    "probe": "export-slicedata",
+    "output_dir_chars": 96,
+    "exit_code": 0,
+    "gcode_count": 1,
+    "exports": [],
+    "tool_changes": 0,
+    "generator": "Snapmaker Orca 2.4.1",
+    "time_s": 925,
+    "filament_g": 3.65,
+    "filament_per_head_g": [
+      3.65,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "config": {
+      "enable_prime_tower": "0",
+      "support_type": "tree(auto)",
+      "wipe_tower_filament": "0",
+      "filament_colour": "#FFFFFF;#000000;#F4E2C1;#ED1C24",
+      "flush_volumes_matrix": "0,223,203,361,703,0,684,545,288,245,0,324,673,231,602,0",
+      "prime_volume": "45"
+    }
+  },
+  {
+    "probe": "baseline",
+    "output_dir_chars": 88,
+    "exit_code": 0,
+    "gcode_count": 1,
+    "exports": [],
+    "tool_changes": 0,
+    "generator": "Snapmaker Orca 2.4.1",
+    "time_s": 925,
+    "filament_g": 3.65,
+    "filament_per_head_g": [
+      3.65,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "config": {
+      "enable_prime_tower": "0",
+      "support_type": "tree(auto)",
+      "wipe_tower_filament": "0",
+      "filament_colour": "#FFFFFF;#000000;#F4E2C1;#ED1C24",
+      "flush_volumes_matrix": "0,223,203,361,703,0,684,545,288,245,0,324,673,231,602,0",
+      "prime_volume": "45"
+    }
+  },
+  {
+    "probe": "raw-system-presets",
+    "output_dir_chars": 98,
+    "exit_code": 3221225477,
+    "gcode_count": 0,
+    "exports": []
+  },
+  {
+    "probe": "machine-user",
+    "output_dir_chars": 92,
+    "exit_code": 4294967279,
+    "gcode_count": 0,
+    "exports": []
+  },
+  {
+    "probe": "wipe-tower-filament",
+    "output_dir_chars": 99,
+    "exit_code": 3221225477,
+    "gcode_count": 0,
+    "exports": []
+  },
+  {
+    "probe": "export-3mf",
+    "output_dir_chars": 90,
+    "exit_code": 3221225477,
+    "gcode_count": 1,
+    "exports": [],
+    "tool_changes": 0,
+    "generator": "Snapmaker Orca 2.4.1",
+    "time_s": 925,
+    "filament_g": 3.65,
+    "filament_per_head_g": [
+      3.65,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "config": {
+      "enable_prime_tower": "0",
+      "support_type": "tree(auto)",
+      "wipe_tower_filament": "0",
+      "filament_colour": "#FFFFFF;#000000;#F4E2C1;#ED1C24",
+      "flush_volumes_matrix": "0,223,203,361,703,0,684,545,288,245,0,324,673,231,602,0",
+      "prime_volume": "45"
+    }
+  },
+  {
+    "probe": "msys-settings-path",
+    "output_dir_chars": 98,
+    "exit_code": 4294967293,
+    "gcode_count": 0,
+    "exports": []
+  },
+  {
+    "probe": "invalid-enum",
+    "output_dir_chars": 92,
+    "exit_code": 0,
+    "gcode_count": 1,
+    "exports": [],
+    "tool_changes": 0,
+    "generator": "Snapmaker Orca 2.4.1",
+    "time_s": 925,
+    "filament_g": 3.65,
+    "filament_per_head_g": [
+      3.65,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "config": {
+      "enable_prime_tower": "0",
+      "support_type": "normal(auto)",
+      "wipe_tower_filament": "0",
+      "filament_colour": "#FFFFFF;#000000;#F4E2C1;#ED1C24",
+      "flush_volumes_matrix": "0,223,203,361,703,0,684,545,288,245,0,324,673,231,602,0",
+      "prime_volume": "45"
+    }
+  },
+  {
+    "probe": "output-229",
+    "output_dir_chars": 229,
+    "exit_code": 0,
+    "gcode_count": 1,
+    "exports": [],
+    "tool_changes": 0,
+    "generator": "Snapmaker Orca 2.4.1",
+    "time_s": 925,
+    "filament_g": 3.65,
+    "filament_per_head_g": [
+      3.65,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "config": {
+      "enable_prime_tower": "0",
+      "support_type": "tree(auto)",
+      "wipe_tower_filament": "0",
+      "filament_colour": "#FFFFFF;#000000;#F4E2C1;#ED1C24",
+      "flush_volumes_matrix": "0,223,203,361,703,0,684,545,288,245,0,324,673,231,602,0",
+      "prime_volume": "45"
+    }
+  },
+  {
+    "probe": "output-230",
+    "output_dir_chars": 230,
+    "exit_code": 4294967196,
+    "gcode_count": 0,
+    "exports": []
+  },
+  {
+    "probe": "safe-project",
+    "output_dir_chars": 92,
+    "exit_code": 0,
+    "gcode_count": 1,
+    "exports": [],
+    "tool_changes": 108,
+    "generator": "Snapmaker Orca 2.4.1",
+    "time_s": 3915,
+    "filament_g": 19.61,
+    "filament_per_head_g": [
+      0.29,
+      2.07,
+      8.48,
+      8.76
+    ],
+    "config": {
+      "enable_prime_tower": "1",
+      "support_type": "tree(auto)",
+      "wipe_tower_filament": "0",
+      "filament_colour": "#FFFFFF;#000000;#F4E2C1;#ED1C24",
+      "flush_volumes_matrix": "0,223,203,361,703,0,684,545,288,245,0,324,673,231,602,0",
+      "prime_volume": "45"
+    }
+  },
+  {
+    "probe": "plate-only",
+    "output_dir_chars": 90,
+    "exit_code": 0,
+    "gcode_count": 1,
+    "exports": [],
+    "tool_changes": 108,
+    "generator": "Snapmaker Orca 2.4.1",
+    "time_s": 3915,
+    "filament_g": 19.61,
+    "filament_per_head_g": [
+      0.29,
+      2.07,
+      8.48,
+      8.76
+    ],
+    "config": {
+      "enable_prime_tower": "1",
+      "support_type": "tree(auto)",
+      "wipe_tower_filament": "0",
+      "filament_colour": "#FFFFFF;#000000;#F4E2C1;#ED1C24",
+      "flush_volumes_matrix": "0,223,203,361,703,0,684,545,288,245,0,324,673,231,602,0",
+      "prime_volume": "45"
+    }
+  },
+  {
+    "probe": "application-only",
+    "output_dir_chars": 96,
+    "exit_code": 3221225477,
+    "gcode_count": 0,
+    "exports": []
+  },
+  {
+    "probe": "full-project",
+    "output_dir_chars": 92,
+    "exit_code": 0,
+    "gcode_count": 1,
+    "exports": [],
+    "tool_changes": 108,
+    "generator": "Snapmaker Orca 2.4.1",
+    "time_s": 2039,
+    "filament_g": 7.78,
+    "filament_per_head_g": [
+      0.06,
+      0.54,
+      3.65,
+      3.52
+    ],
+    "config": {
+      "enable_prime_tower": "0",
+      "support_type": "tree(auto)",
+      "wipe_tower_filament": "0",
+      "filament_colour": "#FFFFFF;#000000;#F4E2C1;#ED1C24",
+      "flush_volumes_matrix": "0,223,203,361,703,0,684,545,288,245,0,324,673,231,602,0",
+      "prime_volume": "45"
+    }
+  },
+  {
+    "probe": "no-colours",
+    "output_dir_chars": 90,
+    "exit_code": 0,
+    "gcode_count": 1,
+    "exports": [],
+    "tool_changes": 108,
+    "generator": "Snapmaker Orca 2.4.1",
+    "time_s": 3915,
+    "filament_g": 19.61,
+    "filament_per_head_g": [
+      0.29,
+      2.07,
+      8.48,
+      8.76
+    ],
+    "config": {
+      "enable_prime_tower": "1",
+      "support_type": "tree(auto)",
+      "wipe_tower_filament": "0",
+      "filament_colour": "#F2754E",
+      "flush_volumes_matrix": "0,280,280,280,280,0,280,280,280,280,0,280,280,280,280,0",
+      "prime_volume": "45"
+    }
+  },
+  {
+    "probe": "purge-zero",
+    "output_dir_chars": 90,
+    "exit_code": 0,
+    "gcode_count": 1,
+    "exports": [],
+    "tool_changes": 108,
+    "generator": "Snapmaker Orca 2.4.1",
+    "time_s": 3915,
+    "filament_g": 19.61,
+    "filament_per_head_g": [
+      0.29,
+      2.07,
+      8.48,
+      8.76
+    ],
+    "config": {
+      "enable_prime_tower": "1",
+      "support_type": "tree(auto)",
+      "wipe_tower_filament": "0",
+      "filament_colour": "#FFFFFF;#000000;#F4E2C1;#ED1C24",
+      "flush_volumes_matrix": "0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0",
+      "prime_volume": "45"
+    }
+  },
+  {
+    "probe": "purge-500",
+    "output_dir_chars": 89,
+    "exit_code": 0,
+    "gcode_count": 1,
+    "exports": [],
+    "tool_changes": 108,
+    "generator": "Snapmaker Orca 2.4.1",
+    "time_s": 3915,
+    "filament_g": 19.61,
+    "filament_per_head_g": [
+      0.29,
+      2.07,
+      8.48,
+      8.76
+    ],
+    "config": {
+      "enable_prime_tower": "1",
+      "support_type": "tree(auto)",
+      "wipe_tower_filament": "0",
+      "filament_colour": "#FFFFFF;#000000;#F4E2C1;#ED1C24",
+      "flush_volumes_matrix": "500,500,500,500,500,500,500,500,500,500,500,500,500,500,500,500",
+      "prime_volume": "45"
+    }
+  },
+  {
+    "probe": "prime-volume-5",
+    "output_dir_chars": 94,
+    "exit_code": 0,
+    "gcode_count": 1,
+    "exports": [],
+    "tool_changes": 108,
+    "generator": "Snapmaker Orca 2.4.1",
+    "time_s": 3165,
+    "filament_g": 13.35,
+    "filament_per_head_g": [
+      0.16,
+      1.4,
+      5.84,
+      5.96
+    ],
+    "config": {
+      "enable_prime_tower": "1",
+      "support_type": "tree(auto)",
+      "wipe_tower_filament": "0",
+      "filament_colour": "#FFFFFF;#000000;#F4E2C1;#ED1C24",
+      "flush_volumes_matrix": "0,223,203,361,703,0,684,545,288,245,0,324,673,231,602,0",
+      "prime_volume": "5"
+    }
+  },
+  {
+    "probe": "no-tower",
+    "output_dir_chars": 88,
+    "exit_code": 0,
+    "gcode_count": 1,
+    "exports": [],
+    "tool_changes": 108,
+    "generator": "Snapmaker Orca 2.4.1",
+    "time_s": 2039,
+    "filament_g": 7.78,
+    "filament_per_head_g": [
+      0.06,
+      0.54,
+      3.65,
+      3.52
+    ],
+    "config": {
+      "enable_prime_tower": "0",
+      "support_type": "tree(auto)",
+      "wipe_tower_filament": "0",
+      "filament_colour": "#FFFFFF;#000000;#F4E2C1;#ED1C24",
+      "flush_volumes_matrix": "0,223,203,361,703,0,684,545,288,245,0,324,673,231,602,0",
+      "prime_volume": "45"
+    }
+  },
+  {
+    "probe": "by-object",
+    "output_dir_chars": 89,
+    "exit_code": 4294967233,
+    "gcode_count": 0,
+    "exports": []
+  }
+]

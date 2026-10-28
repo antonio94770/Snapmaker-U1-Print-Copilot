@@ -12,6 +12,10 @@ Presets are identified by their `name` field, not by file name (for example
 `Generic PLA` lives in a file with a different name). A child preset names its
 parent in `inherits`; flattening merges parent first, then child.
 
+On the installed Windows 2.4.1 release the system tree lives instead at
+<exe_dir>/resources/profiles. Pass that root as system_dir while keeping
+user presets under data_dir; OrcaInstall.system_dir selects the verified root.
+
 This module only reads. It never writes into the Snapmaker Orca data directory.
 """
 
@@ -92,9 +96,12 @@ def _is_instantiable(data: dict[str, Any]) -> bool:
 class PresetLibrary:
     """Index of the system and user presets in a Snapmaker Orca data dir."""
 
-    def __init__(self, data_dir: Path, vendor: str = DEFAULT_VENDOR) -> None:
+    def __init__(
+        self, data_dir: Path, vendor: str = DEFAULT_VENDOR, *, system_dir: Path | None = None
+    ) -> None:
         self.data_dir = data_dir
         self.vendor = vendor
+        self.system_dir = system_dir if system_dir is not None else data_dir / "system"
         # (kind, vendor) -> name -> (ref, raw json)
         self._system: dict[tuple[str, str], dict[str, tuple[PresetRef, dict[str, Any]]]] = {}
         # kind -> name -> (ref, raw json)
@@ -102,7 +109,7 @@ class PresetLibrary:
         self._load()
 
     def _load(self) -> None:
-        system_root = self.data_dir / "system"
+        system_root = self.system_dir
         if not system_root.is_dir():
             raise PresetError(f"No system presets folder at {system_root}")
         for vendor_dir in sorted(p for p in system_root.iterdir() if p.is_dir()):

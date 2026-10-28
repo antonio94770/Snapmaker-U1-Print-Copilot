@@ -22,10 +22,10 @@ def real_install():
 
 
 @pytest.mark.integration
-def test_slice_cube_u1_standard_pla(real_install, tmp_path) -> None:
-    library = PresetLibrary(real_install.data_dir)
+def test_slice_cube_u1_standard_pla(real_install, real_process_name, tmp_path) -> None:
+    library = PresetLibrary(real_install.data_dir, system_dir=real_install.system_dir)
     machine = library.resolve("machine", "Snapmaker U1 (0.4 nozzle)")
-    process = library.resolve("process", "0.20mm Standard @Snapmaker U1 (0.4 nozzle)")
+    process = library.resolve("process", real_process_name)
     filaments = [library.resolve("filament", "Generic PLA")] * 4
 
     run = slice_model(real_install, CUBE, machine, process, filaments, work_dir=tmp_path)
@@ -45,12 +45,12 @@ def test_slice_cube_u1_standard_pla(real_install, tmp_path) -> None:
 
 
 @pytest.mark.integration
-def test_compare_infill_15_vs_30(real_install, tmp_path) -> None:
-    library = PresetLibrary(real_install.data_dir)
+def test_compare_infill_15_vs_30(real_install, real_process_name, tmp_path) -> None:
+    library = PresetLibrary(real_install.data_dir, system_dir=real_install.system_dir)
     selection = actions.select_presets(
         library,
         printer="Snapmaker U1 (0.4 nozzle)",
-        process="0.20mm Standard @Snapmaker U1 (0.4 nozzle)",
+        process=real_process_name,
         filaments=["Generic PLA"],
     )
     comparison = actions.compare_variants(
@@ -73,12 +73,12 @@ def test_compare_infill_15_vs_30(real_install, tmp_path) -> None:
 
 
 @pytest.mark.integration
-def test_orient_tee_prefers_no_support(real_install, tmp_path) -> None:
-    library = PresetLibrary(real_install.data_dir)
+def test_orient_tee_prefers_no_support(real_install, real_process_name, tmp_path) -> None:
+    library = PresetLibrary(real_install.data_dir, system_dir=real_install.system_dir)
     selection = actions.select_presets(
         library,
         printer="Snapmaker U1 (0.4 nozzle)",
-        process="0.20mm Standard @Snapmaker U1 (0.4 nozzle)",
+        process=real_process_name,
         filaments=["Generic PLA"],
     )
     tee = Path(__file__).parent / "fixtures" / "tee.stl"
@@ -95,17 +95,17 @@ def test_orient_tee_prefers_no_support(real_install, tmp_path) -> None:
 
 
 @pytest.mark.integration
-def test_orient_bust_quality_keeps_face_clean(real_install, tmp_path) -> None:
+def test_orient_bust_quality_keeps_face_clean(real_install, real_process_name, tmp_path) -> None:
     from print_copilot.model.mesh import write_stl
     from print_copilot.model.orientation import Region
     from synthetic_bust import FACE_BOX_MAX, FACE_BOX_MIN, bust_mesh
 
     model = write_stl(bust_mesh(), tmp_path / "bust.stl")
-    library = PresetLibrary(real_install.data_dir)
+    library = PresetLibrary(real_install.data_dir, system_dir=real_install.system_dir)
     selection = actions.select_presets(
         library,
         printer="Snapmaker U1 (0.4 nozzle)",
-        process="0.20mm Standard @Snapmaker U1 (0.4 nozzle)",
+        process=real_process_name,
         filaments=["Generic PLA"],
     )
     face = Region("face", [0, -1, 0], 70, FACE_BOX_MIN, FACE_BOX_MAX)
