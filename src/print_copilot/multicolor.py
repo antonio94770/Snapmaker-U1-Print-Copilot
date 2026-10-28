@@ -769,6 +769,8 @@ def export_project(
     out = to_windows_path(out_path)
     source = to_windows_path(model)
     gcode_out = out.with_suffix(".gcode") if slice_gcode else None
+    if not out.parent.is_dir():
+        raise SliceError(f"Output folder {out.parent} does not exist; create it or choose another.")
     for target in (out, gcode_out):
         if target is not None and target.exists():
             raise SliceError(f"{target} already exists; choose a new file name.")

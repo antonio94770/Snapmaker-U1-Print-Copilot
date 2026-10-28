@@ -236,6 +236,9 @@ def test_export_project(fake_install, project_file, selection, tmp_path) -> None
     assert len(settings["filament_settings_id"]) == 4
     with pytest.raises(SliceError, match="already exists"):
         multicolor.export_project(fake_install, project_file, selection, out, plate=2)
+    missing = tmp_path / "missing" / "out.3mf"
+    with pytest.raises(SliceError, match="does not exist"):
+        multicolor.export_project(fake_install, project_file, selection, missing, plate=2)
 
 
 def test_open_in_app(fake_install, monkeypatch, project_file) -> None:
