@@ -9,29 +9,42 @@ print quality are heuristics and say so.
 from __future__ import annotations
 
 import contextlib
+import dataclasses
 import json
 import os
+import shutil
 import subprocess
 import uuid
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
 import numpy as np
 
-from print_copilot.actions import Selection, Variant, bed_size
+from print_copilot.actions import CONF_SOURCE, Selection, Variant, bed_size
 from print_copilot.errors import PrintCopilotError, SliceError
 from print_copilot.gcode.toolchanges import ToolChangeStats, grams_per_mm, to_grams, tool_changes
 from print_copilot.model.footprint import free_rectangle, occupancy
 from print_copilot.model.mesh import load_mesh
 from print_copilot.orca.conf import current_setup, default_conf_path
-from print_copilot.orca.heads import Head, HeadAssignment, Wanted, assign_heads
+from print_copilot.orca.heads import (
+    CLEARLY_DIFFERENT_DELTA_E,
+    COLOUR_RE,
+    Head,
+    HeadAssignment,
+    Wanted,
+    assign_heads,
+    delta_e,
+)
 from print_copilot.orca.install import OrcaInstall, cli_path, to_windows_path
 from print_copilot.orca.project import (
     ProjectInfo,
+    is_project,
     project_settings,
     read_project,
     write_app_project,
+    write_model_project,
     write_slicing_copy,
 )
 from print_copilot.orca.slicer import (
@@ -43,6 +56,8 @@ from print_copilot.orca.slicer import (
     prepare_cli_settings,
     slice_model,
 )
+from print_copilot.printer.moonraker import MoonrakerClient
+from print_copilot.printer.status import HeadStatus, read_status
 from print_copilot.serialize import to_jsonable
 
 # `--arrange 0` keeps the build positions; without it the CLI re-arranges the
@@ -70,15 +85,103 @@ BY_OBJECT_NOTE = (
 )
 
 
+RFID_SOURCE = "RFID"
+
+
+class HeadChoiceRequired(SliceError):
+    """A one-colour plate and no head given: the user has to say which spool to use."""
+
+
+def _preset_type(preset) -> str | None:
+    types = preset.settings.get("filament_type")
+    kind = types[0] if isinstance(types, list) and types else types
+    return kind or None
+
+
 def heads_for(selection: Selection) -> list[Head]:
-    """What is loaded on each head: preset name, colour (from the conf) and type."""
+    """What is loaded on each head: preset name, colour and type."""
     heads = []
     for index, preset in enumerate(selection.filaments):
-        types = preset.settings.get("filament_type")
-        kind = types[0] if isinstance(types, list) and types else types
         colour = selection.colours[index] if selection.colours else None
-        heads.append(Head(index=index, filament=preset.name, colour=colour, type=kind or None))
+        heads.append(
+            Head(index=index, filament=preset.name, colour=colour, type=_preset_type(preset))
+        )
     return heads
+
+
+def use_printer_spools(selection: Selection, heads: Sequence[HeadStatus]) -> Selection:
+    """The colour of each head whose RFID reader identified a spool, in place
+    of the colour stored in Snapmaker_Orca.conf: the printer knows what is
+    loaded, the app only what was last selected. Heads without a tag keep the
+    stored colour, and a note says so. RFID entry i is head T<i> (verified on
+    the U1 on 2026-10-28: black spool read on T1, the T1 print came out black)."""
+    count = len(selection.filaments)
+    colours: list[str | None] = list(selection.colours or [None] * count)
+    sources: list[str | None] = list(selection.colour_sources or [None] * count)
+    notes = []
+    for head in heads:
+        spool = head.rfid_filament
+        if head.index >= count or spool is None or not COLOUR_RE.match(spool.colour or ""):
+            continue
+        before = colours[head.index]
+        if before and delta_e(before, spool.colour) > CLEARLY_DIFFERENT_DELTA_E:
+            notes.append(
+                f"T{head.index}: Snapmaker Orca has {before} selected but the RFID reader "
+                f"identified {spool.colour} ({spool.type} {spool.sub_type}); using the RFID colour."
+            )
+        preset_type = _preset_type(selection.filaments[head.index])
+        if preset_type and spool.type and preset_type.upper() != spool.type.upper():
+            notes.append(
+                f"T{head.index}: the filament preset is {preset_type} "
+                f"({selection.filaments[head.index].name}) but the spool is {spool.type}."
+            )
+        colours[head.index], sources[head.index] = spool.colour, RFID_SOURCE
+    untagged = [f"T{i}" for i in range(count) if sources[i] != RFID_SOURCE]
+    if untagged:
+        notes.append(
+            f"{', '.join(untagged)}: no RFID tag read; their colours are the ones selected in "
+            f"Snapmaker Orca ({CONF_SOURCE}), not confirmed by the printer."
+        )
+    known = any(colours)
+    return dataclasses.replace(
+        selection,
+        colours=colours if known else None,  # type: ignore[arg-type]
+        colour_sources=sources if known else None,  # type: ignore[arg-type]
+        notes=list(selection.notes) + notes,
+    )
+
+
+def _printer_heads() -> list[HeadStatus]:
+    return read_status(MoonrakerClient()).heads
+
+
+def with_printer_spools(
+    selection: Selection, read_heads: Callable[[], list[HeadStatus]] | None = None
+) -> Selection:
+    """`use_printer_spools` with the heads read from the U1. When the printer
+    cannot be reached the stored colours are kept and a note says so."""
+    try:
+        heads = (read_heads or _printer_heads)()
+    except PrintCopilotError as exc:
+        note = (
+            f"Printer not reachable ({exc}); the loaded colours are the ones selected in "
+            f"Snapmaker Orca ({CONF_SOURCE}), not what the printer reports."
+        )
+        return dataclasses.replace(selection, notes=[*selection.notes, note])
+    return use_printer_spools(selection, heads)
+
+
+def loaded_heads_text(selection: Selection) -> str:
+    """One line per head: colour, type, preset and where the colour came from."""
+    sources = selection.colour_sources or [None] * len(selection.filaments)
+    parts = []
+    for head in heads_for(selection):
+        kind = f" {head.type}" if head.type else ""
+        parts.append(
+            f"T{head.index} {head.colour or 'colour unknown'}{kind} "
+            f"({head.filament}; colour from {sources[head.index] or 'nowhere'})"
+        )
+    return "; ".join(parts)
 
 
 def wanted_filaments(project: ProjectInfo, plate: int) -> list[Wanted]:
@@ -143,8 +246,14 @@ def inspect_project(
     notes = list(project.notes)
     if selection and not selection.colours:
         notes.append(
-            "The loaded colours are unknown (filaments not taken from Snapmaker_Orca.conf); "
-            "heads are matched by filament type only."
+            "The loaded colours are unknown (neither Snapmaker_Orca.conf nor the printer gave "
+            "them); heads are matched by filament type only."
+        )
+    single = [p.number for p in plates if len(p.filaments) == 1]
+    if single:
+        notes.append(
+            f"Plate(s) {single} print in one colour: the proposed head is only the nearest "
+            "colour; ask the user which loaded spool to use before slicing (head / --head)."
         )
     return ProjectSummary(
         project=project.path,
@@ -205,13 +314,11 @@ def _plate_number(project: ProjectInfo, plate: int | None) -> int:
 
 
 def _head_colours(selection: Selection, assignment: HeadAssignment) -> list[str]:
-    if selection.colours:
-        return list(selection.colours)
-    colours = [PLACEHOLDER_COLOUR] * len(selection.filaments)
+    colours = list(selection.colours or [None] * len(selection.filaments))
     for choice in assignment.choices:
-        if choice.project_colour:
+        if not colours[choice.head] and choice.project_colour:
             colours[choice.head] = choice.project_colour
-    return colours
+    return [c or PLACEHOLDER_COLOUR for c in colours]
 
 
 def _bed(selection: Selection) -> tuple[tuple[float, float, float] | None, tuple[float, float]]:
@@ -279,6 +386,38 @@ def tower_position(prepared: _Prepared, selection: Selection) -> tuple[float, fl
     )
 
 
+def _as_project(model: str | os.PathLike[str], folder: Path) -> tuple[Path, list[str]]:
+    """The model itself when it is a slicer project; otherwise (an STL, or a
+    3MF without slicer metadata) a one-object project wrapping it."""
+    path = Path(model)
+    if path.suffix.lower() == ".3mf" and is_project(path):
+        return path, []
+    mesh = load_mesh(path)
+    wrapped = write_model_project(
+        mesh.triangles, folder / f"{path.stem}-project.3mf", name=path.stem, filament_type=None
+    )
+    return wrapped, [
+        f"{path.name} is a plain model with no colour; it is handled as a one-object, "
+        "one-filament project."
+    ]
+
+
+def _head_choice_message(wanted: Wanted, selection: Selection) -> str:
+    hint = ""
+    coloured = [h for h in heads_for(selection) if h.colour]
+    if wanted.colour and coloured:
+        near = min(coloured, key=lambda h: delta_e(wanted.colour, h.colour))  # type: ignore[arg-type]
+        hint = (
+            f" The model asks for {wanted.colour}; the nearest loaded colour is on "
+            f"T{near.index} ({near.colour})."
+        )
+    return (
+        "This plate prints in one colour, so the head is not chosen automatically: ask the "
+        "user which loaded spool to print with and pass head (CLI: --head T<n>)."
+        f"{hint} Loaded: {loaded_heads_text(selection)}."
+    )
+
+
 def _prepare(
     model: str | os.PathLike[str],
     selection: Selection,
@@ -286,11 +425,20 @@ def _prepare(
     mapping: dict[int, int] | None,
     folder: Path,
     reduce_colours: bool = False,
+    head: int | None = None,
 ) -> _Prepared:
-    project = read_project(model)
+    source, wrap_notes = _as_project(model, folder)
+    project = read_project(source)
     number = _plate_number(project, plate)
+    wanted = wanted_filaments(project, number)
+    if head is not None:
+        if mapping:
+            raise SliceError("Give either head (one head for the whole plate) or mapping.")
+        mapping = {w.number: head for w in wanted}
+    elif not mapping and len(wanted) == 1:
+        raise HeadChoiceRequired(_head_choice_message(wanted[0], selection))
     assignment = assign_heads(
-        wanted_filaments(project, number),
+        wanted,
         heads_for(selection),
         mapping,
         reduce_to_heads=reduce_colours,
@@ -304,7 +452,7 @@ def _prepare(
         bed_mm=size,
         bed_origin_mm=origin,
     )
-    notes = list(project.notes) + assignment.notes + copy.notes
+    notes = wrap_notes + list(project.notes) + assignment.notes + copy.notes
     if size is None:
         notes.append(f"{selection.machine.name!r} has no printable area; bed fit unchecked.")
     if project.printer and project.printer != selection.machine.name:
@@ -370,19 +518,23 @@ def slice_project(
     overrides: dict[str, OverrideValue] | None = None,
     work_dir: str | os.PathLike[str] | None = None,
     timeout_s: float = DEFAULT_TIMEOUT_S,
+    head: int | None = None,
 ) -> ProjectSlice:
     """Slice one plate of a 3MF project on the selected printer.
 
     Filaments are assigned to heads with `assign_heads` (`mapping` fixes some
     or all: project filament number -> head index, 0 = T0; `reduce_colours`
-    merges the nearest colours when there are more than heads). A copy the CLI
-    can read is written into a fresh folder and sliced with `--arrange 0`;
-    tool changes, prime tower and purge are measured from the G-code.
+    merges the nearest colours when there are more than heads; `head` puts the
+    whole plate on one head). A one-colour plate needs `head` or `mapping`
+    (`HeadChoiceRequired`). An STL or plain 3MF is handled as a one-object
+    project. A copy the CLI can read is written into a fresh folder and sliced
+    with `--arrange 0`; tool changes, prime tower and purge are measured from
+    the G-code.
     """
     base = to_windows_path(work_dir) if work_dir else default_work_dir()
     folder = base / f"project-{datetime.now():%Y%m%d-%H%M%S}-{uuid.uuid4().hex[:6]}"
     folder.mkdir(parents=True)
-    prepared = _prepare(model, selection, plate, mapping, folder, reduce_colours)
+    prepared = _prepare(model, selection, plate, mapping, folder, reduce_colours, head)
     return _slice_prepared(install, prepared, selection, overrides, folder, timeout_s)
 
 
@@ -482,6 +634,7 @@ def compare_strategies(
     variants: list[Variant] | None = None,
     work_dir: str | os.PathLike[str] | None = None,
     timeout_s: float = DEFAULT_TIMEOUT_S,
+    head: int | None = None,
 ) -> StrategyComparison:
     """Slice one plate once per variant (default `U1_VARIANTS`) with the same
     head assignment and compare time, filament, tool changes and prime tower.
@@ -505,7 +658,7 @@ def compare_strategies(
     base = to_windows_path(work_dir) if work_dir else default_work_dir()
     folder = base / f"strategies-{datetime.now():%Y%m%d-%H%M%S}-{uuid.uuid4().hex[:6]}"
     folder.mkdir(parents=True)
-    prepared = _prepare(model, selection, plate, mapping, folder, reduce_colours)
+    prepared = _prepare(model, selection, plate, mapping, folder, reduce_colours, head)
     if len(prepared.project.plate_objects(prepared.plate)) < 2:
         variants = [v for v in variants if v.overrides.get("print_sequence") != "by object"]
 
@@ -580,6 +733,10 @@ class ExportedProject:
     filaments: list[str]
     overrides: dict[str, OverrideValue]
     notes: list[str] = field(default_factory=list)
+    # With `slice_gcode`: the G-code sliced from the written project, copied
+    # next to it, and that slice's measured figures.
+    gcode_path: Path | None = None
+    slice: ProjectSlice | None = None
 
 
 def export_project(
@@ -593,23 +750,34 @@ def export_project(
     reduce_colours: bool = False,
     overrides: dict[str, OverrideValue] | None = None,
     work_dir: str | os.PathLike[str] | None = None,
+    head: int | None = None,
+    slice_gcode: bool = False,
+    timeout_s: float = DEFAULT_TIMEOUT_S,
 ) -> ExportedProject:
-    """Write one plate of a project as a new 3MF for Snapmaker Orca: objects
-    centred on the bed, filaments assigned to heads like `slice_project`, and
-    the selected presets (with `overrides`) as the project settings.
+    """Write one plate of a project (or an STL) as a new 3MF for Snapmaker
+    Orca: objects centred on the bed, filaments assigned to heads like
+    `slice_project`, and the selected presets (with `overrides`) as the
+    project settings.
 
-    `out_path` must not exist; the source file is never changed.
+    With `slice_gcode` the written project itself is sliced and the G-code is
+    copied next to it (same name, `.gcode`), so the file to reopen in the app
+    and the file to print come from the same project.
+
+    `out_path` (and with `slice_gcode` the `.gcode` next to it) must not
+    exist; the source file is never changed.
     """
     out = to_windows_path(out_path)
     source = to_windows_path(model)
-    if out.exists():
-        raise SliceError(f"{out} already exists; choose a new file name.")
+    gcode_out = out.with_suffix(".gcode") if slice_gcode else None
+    for target in (out, gcode_out):
+        if target is not None and target.exists():
+            raise SliceError(f"{target} already exists; choose a new file name.")
     if out.resolve() == source.resolve():
         raise SliceError("The output must be a new file, not the source project.")
     base = to_windows_path(work_dir) if work_dir else default_work_dir()
     folder = base / f"export-{datetime.now():%Y%m%d-%H%M%S}-{uuid.uuid4().hex[:6]}"
     folder.mkdir(parents=True)
-    prepared = _prepare(source, selection, plate, mapping, folder, reduce_colours)
+    prepared = _prepare(source, selection, plate, mapping, folder, reduce_colours, head)
     machine_s, process_s, filament_s = prepare_cli_settings(
         selection.machine,
         selection.process,
@@ -638,6 +806,24 @@ def export_project(
         object_ids=[o.id for o in prepared.project.plate_objects(prepared.plate)],
         settings=settings,
     )
+    sliced = None
+    if gcode_out is not None:
+        # In the written project filament N is printed by head N-1.
+        heads_used = {c.head for c in prepared.assignment.choices}
+        sliced = slice_project(
+            install,
+            out,
+            selection,
+            mapping={h + 1: h for h in heads_used},
+            overrides=overrides,
+            work_dir=folder,
+            timeout_s=timeout_s,
+        )
+        shutil.copy2(sliced.gcode_path, gcode_out)
+        notes.append(
+            f"{gcode_out.name} was sliced from {out.name}: open {out} in Snapmaker Orca to see "
+            "or change exactly what this G-code prints."
+        )
     return ExportedProject(
         path=out,
         source=source,
@@ -648,6 +834,8 @@ def export_project(
         filaments=[f.name for f in selection.filaments],
         overrides=SettingsOverrides.from_flat(overrides).to_flat(),
         notes=notes,
+        gcode_path=gcode_out,
+        slice=sliced,
     )
 
 

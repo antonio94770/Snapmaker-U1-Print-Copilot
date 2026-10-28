@@ -727,3 +727,67 @@ def write_app_project(
             zout.writestr(name, data)
         zout.writestr(PROJECT_CONFIG, json.dumps(settings, indent=4, ensure_ascii=False))
     return dest_path
+
+
+_RELS = (
+    '<?xml version="1.0" encoding="UTF-8"?>\n<Relationships '
+    'xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+    '<Relationship Target="/{target}" Id="rel-1" '
+    'Type="http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel"/></Relationships>\n'
+)
+_CONTENT_TYPES = (
+    '<?xml version="1.0" encoding="UTF-8"?>\n<Types '
+    'xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+    '<Default Extension="rels" '
+    'ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+    '<Default Extension="model" '
+    'ContentType="application/vnd.ms-package.3dmanufacturing-3dmodel+xml"/></Types>\n'
+)
+PARTS_MODEL = "3D/Objects/object_1.model"
+
+
+def write_model_project(
+    triangles: np.ndarray, dest: str | os.PathLike[str], *, name: str, filament_type: str | None
+) -> Path:
+    """Wrap a plain mesh (an STL, or a 3MF without slicer metadata) into a
+    one-object, one-filament project in the layout `read_project` reads, so
+    the project workflow can put it on a chosen tool head.
+
+    `triangles` is an (n, 3, 3) array in mm. The filament has no colour: a
+    plain mesh does not say which one it should print with.
+    """
+    points, inverse = np.unique(triangles.reshape(-1, 3), axis=0, return_inverse=True)
+    faces = inverse.reshape(-1, 3)
+    vertices = "".join(f'<vertex x="{x:.6g}" y="{y:.6g}" z="{z:.6g}"/>' for x, y, z in points)
+    tris = "".join(f'<triangle v1="{a}" v2="{b}" v3="{c}"/>' for a, b, c in faces)
+    header = (
+        f'<?xml version="1.0" encoding="UTF-8"?>\n<model unit="millimeter" xmlns="{CORE_NS}" '
+        f'xmlns:p="{PRODUCTION_NS}" requiredextensions="p">'
+    )
+    parts = (
+        f'{header}<resources><object id="1" type="model"><mesh><vertices>{vertices}'
+        f"</vertices><triangles>{tris}</triangles></mesh></object></resources></model>\n"
+    )
+    root = (
+        f'{header}<resources><object id="2" type="model"><components>'
+        f'<component p:path="/{PARTS_MODEL}" objectid="1" transform="1 0 0 0 1 0 0 0 1 0 0 0"/>'
+        "</components></object></resources><build>"
+        '<item objectid="2" transform="1 0 0 0 1 0 0 0 1 0 0 0"/></build></model>\n'
+    )
+    config = ElementTree.Element("config")
+    obj = ElementTree.SubElement(config, "object", {"id": "2"})
+    for key, value in (("name", name), ("extruder", "1")):
+        ElementTree.SubElement(obj, "metadata", {"key": key, "value": value})
+    part = ElementTree.SubElement(obj, "part", {"id": "1", "subtype": "normal_part"})
+    ElementTree.SubElement(part, "metadata", {"key": "name", "value": name})
+    settings = {"filament_colour": [""], "filament_type": [filament_type or ""]}
+    dest_path = Path(dest)
+    with zipfile.ZipFile(dest_path, "x", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("[Content_Types].xml", _CONTENT_TYPES)
+        archive.writestr("_rels/.rels", _RELS.format(target=ROOT_MODEL))
+        archive.writestr(ROOT_MODEL, root)
+        archive.writestr("3D/_rels/3dmodel.model.rels", _RELS.format(target=PARTS_MODEL))
+        archive.writestr(PARTS_MODEL, parts)
+        archive.writestr(MODEL_CONFIG, ElementTree.tostring(config, xml_declaration=True))
+        archive.writestr(PROJECT_CONFIG, json.dumps(settings))
+    return dest_path

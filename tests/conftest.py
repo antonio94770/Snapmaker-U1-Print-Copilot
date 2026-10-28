@@ -10,6 +10,19 @@ from print_copilot.orca.presets import PresetLibrary
 FIXTURES = Path(__file__).parent / "fixtures"
 
 
+@pytest.fixture(autouse=True)
+def no_real_printer(monkeypatch) -> None:
+    """Project tools read the loaded spools from the U1 by default; tests never
+    reach a real printer (tests that want spools pass `read_heads`)."""
+    from print_copilot import multicolor
+    from print_copilot.errors import PrinterError
+
+    def unreachable():
+        raise PrinterError("no printer in tests")
+
+    monkeypatch.setattr(multicolor, "_printer_heads", unreachable)
+
+
 @pytest.fixture
 def orca_data() -> Path:
     return FIXTURES / "orca_data"

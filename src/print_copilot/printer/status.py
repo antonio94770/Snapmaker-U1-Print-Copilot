@@ -1,8 +1,8 @@
 """Read-only printer status: state, temperatures, the four heads and their spools.
 
 Object and field names below were read from a U1 on firmware 2.0.0. The order of
-`filament_detect.info` is assumed to follow the heads (entry 0 = head 1 =
-`extruder`): TO VERIFY ON HARDWARE.
+`filament_detect.info` follows the heads (entry 0 = T0 = `extruder`; verified
+2026-10-28: the black spool read on entry 1 printed from T1).
 """
 
 from __future__ import annotations

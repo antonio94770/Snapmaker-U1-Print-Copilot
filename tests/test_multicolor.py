@@ -11,6 +11,7 @@ from print_copilot import cli, multicolor
 from print_copilot.actions import Variant, run_slice, select_presets
 from print_copilot.errors import ModelError, SliceError
 from print_copilot.orca.project import PROJECT_CONFIG, read_project
+from print_copilot.printer.status import HeadStatus, LoadedFilament
 from synthetic_project import build_project
 
 U1 = "Snapmaker U1 (0.4 nozzle)"
@@ -284,3 +285,100 @@ def test_cli_project_commands(
     assert cli.main([*args[:-1], str(tmp_path / "other.3mf"), "--map", "bad"]) == 1
     _, err = capsys.readouterr()
     assert "expected KEY=VALUE" in err
+
+
+# Loaded colours from the printer, one-colour plates, STL models, export + slice
+
+
+def _head(index: int, colour: str | None, kind: str = "PLA") -> HeadStatus:
+    spool = (
+        LoadedFilament("Snapmaker", "Polymaker", kind, "SnapSpeed", colour, True, 190, 230)
+        if colour
+        else None
+    )
+    return HeadStatus(index, f"extruder{index or ''}", 25, 0, "PARKED", 0.4, spool)
+
+
+def test_given_filaments_keep_the_stored_colours(library) -> None:
+    chosen = select_presets(library, printer=U1, process=None, filaments=["Generic PLA"])
+    assert chosen.colours == ["#FFFFFF", "#000000", "#F4E2C1", "#ED1C24"]
+    assert chosen.colour_sources == ["Snapmaker_Orca.conf"] * 4
+
+
+def test_printer_spools_replace_the_stored_colours(selection) -> None:
+    heads = [_head(0, "#E2DEDB"), _head(1, "#FF0000", "PETG"), _head(2, None), _head(3, None)]
+    updated = multicolor.use_printer_spools(selection, heads)
+    assert updated.colours == ["#E2DEDB", "#FF0000", "#F4E2C1", "#ED1C24"]
+    assert updated.colour_sources[:2] == ["RFID", "RFID"]
+    assert any("T1: Snapmaker Orca has #000000 selected" in n for n in updated.notes)
+    assert any("T1: the filament preset is PLA" in n for n in updated.notes)
+    assert any(n.startswith("T2, T3: no RFID tag read") for n in updated.notes)
+    assert selection.colours[1] == "#000000"  # the input is not changed
+
+
+def test_unreachable_printer_keeps_the_stored_colours(selection) -> None:
+    updated = multicolor.with_printer_spools(selection)  # conftest: no printer
+    assert updated.colours == selection.colours
+    assert any("Printer not reachable" in n for n in updated.notes)
+
+
+def test_one_colour_plate_needs_a_head(fake_install, fake_multi, selection, tmp_path) -> None:
+    model = Path(__file__).parent / "fixtures" / "tee.stl"
+    with pytest.raises(multicolor.HeadChoiceRequired, match="ask the user") as error:
+        multicolor.slice_project(fake_install, model, selection, work_dir=tmp_path)
+    assert "T1 #000000 PLA" in str(error.value)
+    assert "colour from Snapmaker_Orca.conf" in str(error.value)
+    with pytest.raises(SliceError, match="either head"):
+        multicolor.slice_project(
+            fake_install, model, selection, head=1, mapping={1: 1}, work_dir=tmp_path
+        )
+
+
+def test_stl_prints_on_the_chosen_head(fake_install, fake_multi, selection, tmp_path) -> None:
+    model = Path(__file__).parent / "fixtures" / "tee.stl"
+    result = multicolor.slice_project(fake_install, model, selection, head=1, work_dir=tmp_path)
+    assert [h.head for h in result.heads] == [1]
+    assert result.heads[0].colour == "#000000"
+    assert result.assignment.choices[0].explicit
+    assert any("tee.stl is a plain model" in n for n in result.notes)
+
+
+def test_export_slices_the_written_project(fake_install, fake_multi, selection, tmp_path) -> None:
+    model = Path(__file__).parent / "fixtures" / "tee.stl"
+    out = tmp_path / "tee_black.3mf"
+    exported = multicolor.export_project(
+        fake_install, model, selection, out, head=1, slice_gcode=True, work_dir=tmp_path / "w"
+    )
+    assert exported.gcode_path == tmp_path / "tee_black.gcode"
+    assert exported.gcode_path.read_text(encoding="utf-8").startswith("T1")
+    # One slice only, of the written project (filament 2 = T1 there).
+    assert len(fake_multi.commands) == 1
+    assert exported.slice.project == out
+    assert read_project(fake_multi.commands[0][-1]).plate_filaments(1) == [2]
+    assert exported.slice.heads[0].head == 1
+    assert any(f"open {out}" in n for n in exported.notes)
+    (tmp_path / "taken.gcode").write_text("x")
+    with pytest.raises(SliceError, match=r"taken\.gcode already exists"):
+        multicolor.export_project(
+            fake_install, model, selection, tmp_path / "taken.3mf", head=1, slice_gcode=True
+        )
+    assert not (tmp_path / "taken.3mf").exists()
+
+
+def test_cli_head_option(
+    capsys, monkeypatch, fake_install, fake_multi, orca_data, tmp_path
+) -> None:
+    monkeypatch.setenv("PRINT_COPILOT_ORCA_EXE", str(fake_install.exe))
+    model = str(Path(__file__).parent / "fixtures" / "tee.stl")
+    common = ["--orca-data", str(orca_data), "--printer", U1, "--work-dir", str(tmp_path)]
+    assert cli.main(["slice-project", model, *common]) == 1
+    _, err = capsys.readouterr()
+    assert "--head T<n>" in err
+    out_path = tmp_path / "tee.3mf"
+    assert cli.main(["export-project", model, *common, "--head", "T1", "--out", str(out_path)]) == 0
+    out, err = capsys.readouterr()
+    assert f"To reopen what this G-code prints: {out_path}" in out
+    assert "Printer not reachable" in err
+    assert cli.parse_head("t2") == 2
+    with pytest.raises(SliceError, match="expected T<n>"):
+        cli.parse_head("black")

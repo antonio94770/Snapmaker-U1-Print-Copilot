@@ -41,7 +41,7 @@ Optional environment variables (the same ones the CLI reads):
 | `inspect_project` | reads a 3MF project (Snapmaker Orca, Bambu Studio, PrusaSlicer): plates, objects, the filaments each plate uses, and the U1 tool head proposed for each from the loaded colours | `print-copilot project` |
 | `slice_project` | slices one plate of a project on the U1 with that head assignment and returns time, grams per head, tool changes, prime tower and purge grams | `print-copilot slice-project` |
 | `compare_strategies` | slices one plate with the prime tower on/off and one object at a time, and compares the measured results | `print-copilot strategies` |
-| `export_project` | writes the plate as a new 3MF for Snapmaker Orca with the U1 presets and heads, and can open it in the app | `print-copilot export-project` |
+| `export_project` | writes the plate (or an STL) as a new 3MF for Snapmaker Orca with the U1 presets and heads, slices that 3MF into a `.gcode` next to it, and can open it in the app | `print-copilot export-project` |
 
 Printer tools (Moonraker on the U1; the printer is found on the network through
 mDNS, once per server process, and found again if it stops answering):
@@ -59,7 +59,10 @@ mDNS, once per server process, and found again if it stops answering):
 Without a printer, `print-copilot printer fake` runs a fake U1 Moonraker on
 `http://127.0.0.1:7125`; point `PRINT_COPILOT_PRINTER_URL` at it.
 
-The slicing and project tools never talk to the printer. Overrides use preset JSON keys
+The slicing tools never talk to the printer. The project tools (`inspect_project`,
+`slice_project`, `compare_strategies`, `export_project`, `review_print`) read
+the spool colours from the U1's RFID readers (read-only; `use_printer=false`
+skips it) and fall back to the app's selection with a note. Overrides use preset JSON keys
 (`sparse_infill_density`, `wall_loops`, ...). A key without a prefix is a
 process setting; `machine.<key>` and `filament.<key>` target the machine and
 filament presets (filament overrides apply to every head). Keys the preset does
@@ -79,7 +82,11 @@ Multi-colour projects: the agent starts with `inspect_project`, tells the user
 which colour to load on which head when the loaded ones differ (the notes
 give the CIE76 colour distance, a heuristic), slices or compares strategies,
 and finishes with `export_project` (`open_in_app=true`) so the user sees the
-result in Snapmaker Orca. A plate that needs more colours than the U1 has
+result in Snapmaker Orca. A one-colour plate or an STL is never put on a head
+automatically: the tool error lists the loaded spools, the agent asks the
+user which one to use and passes `head`. `export_project` slices the project
+it writes; the agent uploads that `.gcode` and tells the user the `.3mf` is
+the file to reopen for what was printed. A plate that needs more colours than the U1 has
 heads fails with the closest colour pairs; `mapping` or `reduce_colours`
 decide which colours share a head.
 

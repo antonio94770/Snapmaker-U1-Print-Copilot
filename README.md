@@ -120,7 +120,22 @@ from MakerWorld or Printables) are read with their plates, per-object and
 per-part filaments and painted colours. Each filament a plate uses is put on
 the U1 head whose loaded colour is closest (CIE76 delta E, a heuristic);
 filaments of the same colour share a head, and you can fix any of them with
-`--map FILAMENT=T<head>`:
+`--map FILAMENT=T<head>`. The loaded colours come from the U1's RFID readers
+when the printer answers (`--no-printer` skips it), otherwise from the
+selection saved in Snapmaker Orca; the notes say which.
+
+An STL is handled as a one-object project. A plate or STL in one colour is
+never put on a head automatically: the command stops, lists the loaded spools
+and asks for `--head T<n>`.
+
+```bash
+print-copilot export-project funnel.stl --head T1 --out funnel-black.3mf
+```
+
+`export-project` writes the project, slices that same project and puts the
+G-code next to it (`funnel-black.gcode`, unless `--no-slice`). Upload that
+G-code; `funnel-black.3mf` is the file to reopen in Snapmaker Orca to see or
+change exactly what was printed.
 
 ```bash
 print-copilot project mask.3mf
@@ -133,8 +148,8 @@ print-copilot export-project mask.3mf --plate 2 --out mask-plate2-u1.3mf --open
 `slice-project` reports the slicer's time and grams per head plus what it
 measures in the G-code: tool changes, layers with changes, prime tower and
 purge grams. `strategies` slices the same plate as is, without the prime tower
-and one object at a time. `export-project` writes a new 3MF with the U1
-presets and opens it in Snapmaker Orca. A plate that needs more colours than
+and one object at a time. `export-project --open` also opens the new 3MF in
+Snapmaker Orca. A plate that needs more colours than
 the four heads stops with the closest colour pairs; `--map` or
 `--reduce-colours` decide which colours share a head.
 

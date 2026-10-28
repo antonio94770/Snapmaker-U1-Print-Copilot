@@ -6,6 +6,7 @@ format the returned dataclass.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import re
@@ -16,7 +17,7 @@ from pathlib import Path
 
 import numpy as np
 
-from print_copilot.errors import ModelError, SliceError
+from print_copilot.errors import ModelError, PrintCopilotError, SliceError
 from print_copilot.gcode.features import FeatureExtrusion, feature_extrusion
 from print_copilot.model.mesh import load_mesh, write_stl
 from print_copilot.model.orientation import (
@@ -119,9 +120,10 @@ class Selection:
     process: Preset
     filaments: list[Preset]
     notes: list[str] = field(default_factory=list)
-    # Colour loaded on each head, from Snapmaker_Orca.conf; None when the
-    # filaments were not taken from there.
+    # Colour loaded on each head (None when unknown) and where each came from:
+    # Snapmaker_Orca.conf, or the head's RFID reader (`multicolor.use_printer_spools`).
     colours: list[str] | None = None
+    colour_sources: list[str] | None = None
 
 
 def select_presets(
@@ -144,21 +146,23 @@ def select_presets(
         if printer is None:
             notes.append(f"printer {setup.machine!r} from {CONF_SOURCE}")
         printer = setup.machine
+    else:
+        # Only for the colours loaded on the heads; a printer the app never
+        # stored leaves them unknown.
+        with contextlib.suppress(PrintCopilotError):
+            setup = get_current_setup(library.data_dir, printer)
     if process is None:
         assert setup is not None
         if not setup.process:
             raise SliceError(f"{CONF_SOURCE} has no process selected for {printer!r}.")
         process = setup.process
         notes.append(f"process {process!r} from {CONF_SOURCE}")
-    colours: list[str] | None = None
     if not filaments:
         assert setup is not None
         if not setup.filaments:
             raise SliceError(f"{CONF_SOURCE} has no filaments selected for {printer!r}.")
         filaments = setup.filaments
         notes.append(f"filaments {filaments} from {CONF_SOURCE}")
-        if len(setup.filament_colors) == len(filaments):
-            colours = list(setup.filament_colors)
 
     machine_p = library.resolve("machine", printer)
     process_p = library.resolve("process", process)
@@ -168,8 +172,19 @@ def select_presets(
         # The slicer needs one filament per head (HANDOFF.md section 4, gotcha 7).
         filament_p = filament_p * heads
         notes.append(f"using {filaments[0]!r} on all {heads} tool heads")
+    # The colours stored for the printer describe what is loaded on each head,
+    # whichever filament presets this slice uses.
+    colours = sources = None
+    if setup and setup.machine == machine_p.name and len(setup.filament_colors) == heads:
+        colours = list(setup.filament_colors)
+        sources = [CONF_SOURCE] * heads
     return Selection(
-        machine=machine_p, process=process_p, filaments=filament_p, notes=notes, colours=colours
+        machine=machine_p,
+        process=process_p,
+        filaments=filament_p,
+        notes=notes,
+        colours=colours,
+        colour_sources=sources,
     )
 
 

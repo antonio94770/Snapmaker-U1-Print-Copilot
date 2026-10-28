@@ -415,18 +415,35 @@ def parse_mapping(items: list[str] | None) -> dict[int, int] | None:
     return result or None
 
 
+def parse_head(value: str | None) -> int | None:
+    """`T1` or `1` to 1."""
+    if value is None:
+        return None
+    head = value.upper().removeprefix("T")
+    if not head.isdigit():
+        raise SliceError(f"Invalid head {value!r}: expected T<n>, e.g. T1.")
+    return int(head)
+
+
 def _project_selection(args: argparse.Namespace) -> tuple[Any, actions.Selection]:
     install = locate(args.orca_exe, args.orca_data)
     library = PresetLibrary(install.data_dir, vendor=args.vendor, system_dir=install.system_dir)
-    return install, _selection(args, library)
+    selection = _selection(args, library)
+    if not getattr(args, "no_printer", True):
+        shown = len(selection.notes)
+        selection = multicolor.with_printer_spools(selection)
+        for note in selection.notes[shown:]:
+            print(f"note: {note}", file=sys.stderr)
+    return install, selection
 
 
 def _print_assignment(assignment: Any) -> None:
     for c in assignment.choices:
         distance = "" if c.delta_e is None else f", delta E {c.delta_e:g}"
         how = "given" if c.explicit else "chosen"
+        wanted = " ".join(filter(None, [c.project_colour or "?", c.project_type]))
         print(
-            f"    filament {c.filament} ({c.project_colour or '?'} {c.project_type or ''}) -> "
+            f"    filament {c.filament} ({wanted}) -> "
             f"T{c.head} {c.head_filament} ({c.head_colour or '?'}{distance}) [{how}]"
         )
 
@@ -488,6 +505,7 @@ def cmd_slice_project(args: argparse.Namespace) -> int:
         overrides=parse_assignments(args.set),
         work_dir=args.work_dir,
         timeout_s=args.timeout,
+        head=parse_head(args.head),
     )
     if args.json:
         _print_json(result)
@@ -509,6 +527,7 @@ def cmd_strategies(args: argparse.Namespace) -> int:
         variants=variants,
         work_dir=args.work_dir,
         timeout_s=args.timeout,
+        head=parse_head(args.head),
     )
     if args.json:
         _print_json(comparison)
@@ -552,6 +571,9 @@ def cmd_export_project(args: argparse.Namespace) -> int:
         reduce_colours=args.reduce_colours,
         overrides=parse_assignments(args.set),
         work_dir=args.work_dir,
+        head=parse_head(args.head),
+        slice_gcode=not args.no_slice,
+        timeout_s=args.timeout,
     )
     opened = multicolor.open_in_app(install, exported.path) if args.open else None
     if args.json:
@@ -564,8 +586,16 @@ def cmd_export_project(args: argparse.Namespace) -> int:
     print(f"  printer   : {exported.machine}")
     print(f"  process   : {exported.process}")
     _print_assignment(exported.assignment)
+    if exported.slice and exported.gcode_path:
+        r = exported.slice
+        print(f"G-code written: {exported.gcode_path}")
+        print(f"  time      : {format_duration(r.estimated_time_s)} ({r.estimated_time_s} s)")
+        print(f"  filament  : {r.total_filament_g:.2f} g")
+        print(f"  changes   : {r.tool_changes} tool changes on {r.layers_with_changes} layers")
     for note in exported.notes:
         print(f"note: {note}")
+    if exported.gcode_path:
+        print(f"To reopen what this G-code prints: {exported.path}")
     if opened:
         print("Opened in Snapmaker Orca.")
     return 0
@@ -587,6 +617,7 @@ def cmd_quality(args: argparse.Namespace) -> int:
         plate=args.plate,
         mapping=parse_mapping(args.map),
         reduce_colours=args.reduce_colours,
+        head=parse_head(args.head),
         variants=variants,
         compare=not args.no_compare,
         work_dir=args.work_dir,
@@ -964,6 +995,17 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="when a plate uses more filaments than heads, merge the nearest colours (heuristic)",
     )
+    project_opts.add_argument(
+        "--head",
+        metavar="T<n>",
+        help="print the whole plate (or the STL) with this tool head; required for a "
+        "one-colour plate",
+    )
+    project_opts.add_argument(
+        "--no-printer",
+        action="store_true",
+        help="do not read the loaded colours from the U1's RFID readers (use the app's selection)",
+    )
 
     pj = sub.add_parser(
         "project",
@@ -1005,6 +1047,11 @@ def build_parser() -> argparse.ArgumentParser:
     ep.add_argument("--out", required=True, help="new .3mf file to write (never overwritten)")
     ep.add_argument("--set", action="append", metavar="KEY=VALUE", help="as for slice")
     ep.add_argument("--open", action="store_true", help="open the written project in the app")
+    ep.add_argument(
+        "--no-slice",
+        action="store_true",
+        help="only write the project (default: also slice it into a .gcode next to it)",
+    )
     ep.set_defaults(func=cmd_export_project)
 
     q = sub.add_parser(

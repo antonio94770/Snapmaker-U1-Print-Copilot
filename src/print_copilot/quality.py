@@ -262,6 +262,7 @@ def review_print(
     plate: int | None = None,
     mapping: dict[int, int] | None = None,
     reduce_colours: bool = False,
+    head: int | None = None,
     variants: list[actions.Variant] | None = None,
     compare: bool = True,
     work_dir: str | Path | None = None,
@@ -282,7 +283,9 @@ def review_print(
     if source.suffix.lower() not in {".gcode", ".stl", ".3mf"}:
         raise QualityError("Quality review accepts STL, 3MF projects or sliced .gcode files.")
     is_gcode = source.suffix.lower() == ".gcode"
-    if is_gcode and (variants or plate is not None or mapping or reduce_colours):
+    if is_gcode and (
+        variants or plate is not None or mapping or reduce_colours or head is not None
+    ):
         raise QualityError("Existing G-code can only be audited; slicing options require a model.")
     if not is_gcode and (install is None or selection is None):
         raise QualityError(
@@ -309,7 +312,10 @@ def review_print(
     original_hash = file_hash(source)
     evidence = {str(source): original_hash}
     results = []
-    project = not is_gcode and source.suffix.lower() == ".3mf" and is_project(source)
+    # An STL on a chosen head goes through the project workflow like a 3MF.
+    project = not is_gcode and (
+        head is not None or (source.suffix.lower() == ".3mf" and is_project(source))
+    )
     for index, spec in enumerate(specs):
         directory = folder / f"variant-{index}"
         directory.mkdir()
@@ -334,6 +340,7 @@ def review_print(
                     plate=plate,
                     mapping=mapping,
                     reduce_colours=reduce_colours,
+                    head=head,
                     overrides=spec.overrides,
                     work_dir=directory,
                     timeout_s=timeout_s,

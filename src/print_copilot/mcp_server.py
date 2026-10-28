@@ -69,12 +69,20 @@ surface must print cleanly (a miniature's face, text, the side that will be
 seen), pass it as a protect region with goal="quality", then render the
 recommended down_vector with the same regions to check it. Tell the user which
 numbers are measured by the slicer and which are heuristic.
-Multi-colour 3MF projects (from Snapmaker Orca, Bambu Studio, MakerWorld or
-Printables): inspect_project shows plates, the filaments each plate uses and the
-tool head proposed for each from the colours loaded on the U1. slice_project
-slices one plate and measures tool changes, prime tower and purge;
-compare_strategies tries the prime tower off and one object at a time;
-export_project writes the plate as a new project for the app and can open it.
+slice prints an STL with T0; to print it with another head use the
+project tools below with head (they accept STL files too).
+Projects (3MF from Snapmaker Orca, Bambu Studio, MakerWorld or Printables, or
+an STL): inspect_project shows plates, the filaments each plate uses and the
+tool head proposed for each from the colours loaded on the U1. The loaded
+colours come from the printer's RFID readers when it answers, otherwise from
+the app's selection (the notes say which). A one-colour plate or STL is never
+put on a head automatically: show the user the loaded spools and ask which one
+to print with, then pass head. slice_project slices one plate and measures
+tool changes, prime tower and purge; compare_strategies tries the prime tower
+off and one object at a time. To prepare a print, use export_project: it
+writes the project for the app, slices that same project and puts the
+.gcode next to the .3mf. Upload that .gcode and tell the user the .3mf path:
+it is the file to reopen in Snapmaker Orca to see or change what was printed.
 On the U1 the purge matrix has no effect: what costs time and material is the
 number of tool changes and the prime tower. If the plate's colours are not the
 loaded ones, tell the user which filament to load on which head.
@@ -191,6 +199,8 @@ def slice(
 ) -> dict[str, Any]:
     """Slice an STL/3MF model headlessly with Snapmaker Orca and return the
     measured print time, filament per tool head, layer count and key settings.
+    The model prints with T0; for another head use slice_project or
+    export_project with head.
 
     model: absolute path of the model file.
     printer, process, filaments: preset names; anything omitted is taken from
@@ -400,7 +410,10 @@ def render_model(
 
 
 def _project_selection(
-    printer: str | None, process: str | None, filaments: list[str] | None
+    printer: str | None,
+    process: str | None,
+    filaments: list[str] | None,
+    use_printer: bool = False,
 ) -> tuple[Any, actions.Selection]:
     install = locate()
     selection = actions.select_presets(
@@ -409,6 +422,8 @@ def _project_selection(
         process=process,
         filaments=filaments,
     )
+    if use_printer:
+        selection = multicolor.with_printer_spools(selection)
     return install, selection
 
 
@@ -430,6 +445,7 @@ def inspect_project(
     printer: str | None = None,
     filaments: list[str] | None = None,
     reduce_colours: bool = False,
+    use_printer: bool = True,
 ) -> dict[str, Any]:
     """Read a 3MF project without slicing: who saved it, for which printer, its
     plates, the objects and filaments (number, colour, type) each plate uses,
@@ -440,8 +456,9 @@ def inspect_project(
     reduce_colours: merge the nearest colours when a plate needs more filaments
         than there are heads (heuristic; otherwise such a plate gets an error
         with the closest colour pairs).
+    use_printer: as for slice_project.
     """
-    _, selection = _project_selection(printer, None, filaments)
+    _, selection = _project_selection(printer, None, filaments, use_printer)
     summary = multicolor.inspect_project(model, selection, reduce_colours=reduce_colours)
     data = to_jsonable(summary)
     data["notes"] = selection.notes + data["notes"]
@@ -459,8 +476,10 @@ def slice_project(
     printer: str | None = None,
     process: str | None = None,
     filaments: list[str] | None = None,
+    head: int | None = None,
+    use_printer: bool = True,
 ) -> dict[str, Any]:
-    """Slice one plate of a 3MF project on the U1 and return measured time,
+    """Slice one plate of a 3MF project (or an STL) on the U1 and return measured time,
     grams per head, tool changes, layers with changes, prime tower and purge
     grams, plus the head assignment used.
 
@@ -468,9 +487,13 @@ def slice_project(
     mapping: project filament number -> head index (0 = T0), e.g. {"5": 1};
         several filaments may share a head. Unmapped filaments get the nearest
         loaded colour.
+    head: one head (0 = T0) for the whole plate; required for a one-colour
+        plate or an STL: ask the user which loaded spool to use.
+    use_printer: read the loaded colours from the U1's RFID readers (falls
+        back to the app's selection, with a note, when the printer is away).
     overrides, printer, process, filaments: as for slice.
     """
-    install, selection = _project_selection(printer, process, filaments)
+    install, selection = _project_selection(printer, process, filaments, use_printer)
     result = multicolor.slice_project(
         install,
         model,
@@ -479,6 +502,7 @@ def slice_project(
         mapping=_mapping(mapping),
         reduce_colours=reduce_colours,
         overrides=overrides,
+        head=head,
     )
     data = to_jsonable(result)
     data["notes"] = selection.notes + data["notes"]
@@ -496,6 +520,8 @@ def compare_strategies(
     printer: str | None = None,
     process: str | None = None,
     filaments: list[str] | None = None,
+    head: int | None = None,
+    use_printer: bool = True,
 ) -> dict[str, Any]:
     """Slice one plate of a project once per tool-change strategy and compare
     measured time, grams, tool changes and prime tower grams. Default
@@ -506,7 +532,7 @@ def compare_strategies(
     variants: custom strategies instead, same format as compare_variants.
     Other arguments: as for slice_project.
     """
-    install, selection = _project_selection(printer, process, filaments)
+    install, selection = _project_selection(printer, process, filaments, use_printer)
     specs = (
         [actions.Variant(overrides=dict(v.overrides), label=v.label) for v in variants]
         if variants
@@ -520,6 +546,7 @@ def compare_strategies(
         mapping=_mapping(mapping),
         reduce_colours=reduce_colours,
         variants=specs,
+        head=head,
     )
     data = to_jsonable(result)
     data["notes"] = selection.notes + data["notes"]
@@ -543,16 +570,22 @@ def export_project(
     printer: str | None = None,
     process: str | None = None,
     filaments: list[str] | None = None,
+    head: int | None = None,
+    use_printer: bool = True,
+    slice: bool = True,
 ) -> dict[str, Any]:
-    """Write one plate of a project as a NEW 3MF for Snapmaker Orca: objects
-    centred on the U1 bed, filaments on the chosen heads, the selected presets
-    (with overrides) as project settings. With open_in_app, start Snapmaker Orca
-    with it so the user can check and adjust it. Never overwrites a file.
+    """Write one plate of a project (or an STL) as a NEW 3MF for Snapmaker
+    Orca: objects centred on the U1 bed, filaments on the chosen heads, the
+    selected presets (with overrides) as project settings. With slice, that
+    same 3MF is sliced and the G-code is written next to it (same name,
+    .gcode): upload that file, and tell the user the .3mf is the project to
+    reopen for what was printed. With open_in_app, start Snapmaker Orca with
+    it so the user can check and adjust it. Never overwrites a file.
 
-    out_path: absolute path of the new .3mf (must not exist).
+    out_path: absolute path of the new .3mf (must not exist, nor its .gcode).
     Other arguments: as for slice_project.
     """
-    install, selection = _project_selection(printer, process, filaments)
+    install, selection = _project_selection(printer, process, filaments, use_printer)
     exported = multicolor.export_project(
         install,
         model,
@@ -562,6 +595,8 @@ def export_project(
         mapping=_mapping(mapping),
         reduce_colours=reduce_colours,
         overrides=overrides,
+        head=head,
+        slice_gcode=slice,
     )
     data = to_jsonable(exported)
     data["notes"] = selection.notes + data["notes"]
@@ -582,6 +617,8 @@ def review_print(
     compare: bool = True,
     variants: list[VariantSpec] | None = None,
     max_segments: int = 1_000_000,
+    head: int | None = None,
+    use_printer: bool = True,
 ) -> list[str | Image]:
     """Review STL/one 3MF plate or existing G-code before preparing a print.
 
@@ -595,10 +632,11 @@ def review_print(
     starts (seam candidates), not verified seams. No physical roughness is predicted.
     Read findings and actually inspect images before record_quality_review.
     No physical print is authorized, and calibration/hardware remain unverified.
+    head, use_printer: as for slice_project (an STL with head is sliced on that head).
     """
     install = selection = None
     if Path(model).suffix.lower() != ".gcode":
-        install, selection = _project_selection(printer, process, filaments)
+        install, selection = _project_selection(printer, process, filaments, use_printer)
     elif printer or process or filaments:
         raise quality.QualityError(
             "Existing G-code uses its own effective config; omit preset choices."
@@ -613,6 +651,7 @@ def review_print(
         plate=plate,
         mapping=_mapping(mapping),
         reduce_colours=reduce_colours,
+        head=head,
         compare=compare,
         variants=specs,
         max_segments=max_segments,
