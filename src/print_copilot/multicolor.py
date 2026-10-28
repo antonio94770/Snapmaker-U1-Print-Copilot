@@ -1,0 +1,675 @@
+"""Multi-colour projects on the U1: inspect a 3MF, assign its filaments to
+tool heads, slice one plate and compare tool-change strategies.
+
+Shared by the CLI and the MCP server, like `actions.py`. Every number in the
+results comes from the slicer's G-code; head assignment and the notes about
+print quality are heuristics and say so.
+"""
+
+from __future__ import annotations
+
+import contextlib
+import json
+import os
+import subprocess
+import uuid
+from dataclasses import dataclass, field
+from datetime import datetime
+from pathlib import Path
+
+import numpy as np
+
+from print_copilot.actions import Selection, Variant, bed_size
+from print_copilot.errors import PrintCopilotError, SliceError
+from print_copilot.gcode.toolchanges import ToolChangeStats, grams_per_mm, to_grams, tool_changes
+from print_copilot.model.footprint import free_rectangle, occupancy
+from print_copilot.model.mesh import load_mesh
+from print_copilot.orca.conf import current_setup, default_conf_path
+from print_copilot.orca.heads import Head, HeadAssignment, Wanted, assign_heads
+from print_copilot.orca.install import OrcaInstall, cli_path, to_windows_path
+from print_copilot.orca.project import (
+    ProjectInfo,
+    project_settings,
+    read_project,
+    write_app_project,
+    write_slicing_copy,
+)
+from print_copilot.orca.slicer import (
+    DEFAULT_TIMEOUT_S,
+    OverrideValue,
+    SettingsOverrides,
+    SliceRun,
+    default_work_dir,
+    prepare_cli_settings,
+    slice_model,
+)
+from print_copilot.serialize import to_jsonable
+
+# `--arrange 0` keeps the build positions; without it the CLI re-arranges the
+# objects (verified on 01.10.01.50).
+PROJECT_CLI_ARGS: tuple[str, ...] = ("--arrange", "0")
+# Colour for a head when neither Snapmaker_Orca.conf nor the project gives one.
+# Only the number of colours matters to the slicer (see slicer.FILAMENT_COLOUR_KEY).
+PLACEHOLDER_COLOUR = "#808080"
+
+# Tool-change strategies compared by default. Values checked in the G-code
+# config block of real slices on 01.10.01.50.
+U1_VARIANTS: tuple[Variant, ...] = (
+    Variant({}, "presets as is"),
+    Variant({"enable_prime_tower": False}, "no prime tower"),
+    Variant({"print_sequence": "by object"}, "one object at a time"),
+)
+NO_PRIME_TOWER_NOTE = (
+    "Without a prime tower each new tool is only primed by the firmware macro "
+    "SM_PRINT_PREEXTRUDE_FILAMENT; ooze and colour bleed on the part are not measured "
+    "(heuristic risk, check a test print)."
+)
+BY_OBJECT_NOTE = (
+    "One object at a time needs the print head to clear finished objects; the slicer "
+    "checks the clearance (extruder_clearance_radius / _height) and fails if it is too small."
+)
+
+
+def heads_for(selection: Selection) -> list[Head]:
+    """What is loaded on each head: preset name, colour (from the conf) and type."""
+    heads = []
+    for index, preset in enumerate(selection.filaments):
+        types = preset.settings.get("filament_type")
+        kind = types[0] if isinstance(types, list) and types else types
+        colour = selection.colours[index] if selection.colours else None
+        heads.append(Head(index=index, filament=preset.name, colour=colour, type=kind or None))
+    return heads
+
+
+def wanted_filaments(project: ProjectInfo, plate: int) -> list[Wanted]:
+    result = []
+    for number in project.plate_filaments(plate):
+        info = project.filament(number)
+        colour = info.colour[:7] if info and info.colour else None
+        result.append(Wanted(number, colour, info.type if info else None))
+    return result
+
+
+@dataclass
+class PlateSummary:
+    number: int
+    name: str | None
+    objects: list[str]
+    filaments: list[Wanted]
+    assignment: HeadAssignment | None
+    assignment_error: str | None
+
+
+@dataclass
+class ProjectSummary:
+    project: Path
+    application: str | None
+    printer: str | None  # printer the project was saved for
+    filament_count: int
+    plates: list[PlateSummary]
+    heads: list[Head]
+    notes: list[str] = field(default_factory=list)
+
+
+def inspect_project(
+    model: str | os.PathLike[str],
+    selection: Selection | None = None,
+    *,
+    reduce_colours: bool = False,
+) -> ProjectSummary:
+    """Plates, objects and filaments of a 3MF project and, with a selection,
+    the proposed head for every filament of each plate (no slicing)."""
+    project = read_project(model)
+    heads = heads_for(selection) if selection else []
+    plates = []
+    for plate in project.plates:
+        wanted = wanted_filaments(project, plate.number)
+        assignment, error = None, None
+        if heads:
+            try:
+                assignment = assign_heads(wanted, heads, reduce_to_heads=reduce_colours)
+            except SliceError as exc:
+                error = str(exc)
+        plates.append(
+            PlateSummary(
+                number=plate.number,
+                name=plate.name,
+                objects=[o.name or o.id for o in project.plate_objects(plate.number)],
+                filaments=wanted,
+                assignment=assignment,
+                assignment_error=error,
+            )
+        )
+    notes = list(project.notes)
+    if selection and not selection.colours:
+        notes.append(
+            "The loaded colours are unknown (filaments not taken from Snapmaker_Orca.conf); "
+            "heads are matched by filament type only."
+        )
+    return ProjectSummary(
+        project=project.path,
+        application=project.application,
+        printer=project.printer,
+        filament_count=len(project.filaments),
+        plates=plates,
+        heads=heads,
+        notes=notes,
+    )
+
+
+@dataclass
+class HeadUsage:
+    """Measured per head. Grams use the head's own g/mm ratio from the header."""
+
+    head: int
+    filament: str
+    colour: str | None
+    project_filaments: list[int]
+    total_g: float
+    prime_tower_g: float
+    purge_g: float
+
+
+@dataclass
+class ProjectSlice:
+    project: Path
+    plate: int
+    assignment: HeadAssignment
+    slicing_copy: Path
+    machine: str
+    process: str
+    estimated_time_s: int
+    total_filament_g: float
+    tool_changes: int
+    layers_with_changes: int
+    prime_tower_g: float
+    purge_g: float
+    heads: list[HeadUsage]
+    toolpath: ToolChangeStats
+    overrides: dict[str, OverrideValue]
+    gcode_path: Path
+    run_dir: Path
+    notes: list[str] = field(default_factory=list)
+
+
+def _plate_number(project: ProjectInfo, plate: int | None) -> int:
+    if plate is not None:
+        project.plate(plate)
+        return plate
+    if len(project.plates) == 1:
+        return project.plates[0].number
+    raise SliceError(
+        f"{project.path.name} has {len(project.plates)} plates "
+        f"({[p.number for p in project.plates]}); choose one."
+    )
+
+
+def _head_colours(selection: Selection, assignment: HeadAssignment) -> list[str]:
+    if selection.colours:
+        return list(selection.colours)
+    colours = [PLACEHOLDER_COLOUR] * len(selection.filaments)
+    for choice in assignment.choices:
+        if choice.project_colour:
+            colours[choice.head] = choice.project_colour
+    return colours
+
+
+def _bed(selection: Selection) -> tuple[tuple[float, float, float] | None, tuple[float, float]]:
+    size = bed_size(selection.machine)
+    area = selection.machine.settings.get("printable_area")
+    try:
+        xs = [float(p.split("x")[0]) for p in area or []]
+        ys = [float(p.split("x")[1]) for p in area or []]
+        origin = (min(xs), min(ys))
+    except (IndexError, ValueError):
+        origin = (0.0, 0.0)
+    return size, origin
+
+
+@dataclass
+class _Prepared:
+    project: ProjectInfo
+    plate: int
+    assignment: HeadAssignment
+    copy: Path
+    colours: list[str]
+    notes: list[str]
+    bounds_mm: list[list[float]]
+    bed: tuple[tuple[float, float, float] | None, tuple[float, float]]
+
+
+# The slicer refuses a plate whose prime tower overlaps an object:
+# "gcode path conflicts found between WipeTower and <object>" (01.10.01.50).
+TOWER_CONFLICT = "conflicts found between WipeTower"
+# Room kept free for the tower around its position: the tower width plus brim
+# on each side and this margin, and twice that in Y because the depth grows
+# with the purge volume. A heuristic; the slicer's own conflict check decides.
+TOWER_MARGIN_MM = 5.0
+TOWER_CELL_MM = 2.0
+
+
+def _setting_mm(selection: Selection, key: str, default: float) -> float:
+    try:
+        return float(selection.process.settings.get(key, default))
+    except (TypeError, ValueError):
+        return default
+
+
+def tower_position(prepared: _Prepared, selection: Selection) -> tuple[float, float] | None:
+    """A spot, nearest a bed corner, where the prime tower stays clear of the
+    footprint of the plate's objects (see `TOWER_MARGIN_MM`)."""
+    size, origin = prepared.bed
+    if size is None:
+        return None
+    brim = _setting_mm(selection, "prime_tower_brim_width", 5.0)
+    width = _setting_mm(selection, "prime_tower_width", 30.0) + 2 * brim
+    grid = occupancy(load_mesh(prepared.copy).triangles, origin, size[:2], TOWER_CELL_MM)
+    spot = free_rectangle(
+        grid,
+        int(np.ceil(width / TOWER_CELL_MM)),
+        int(np.ceil(2 * width / TOWER_CELL_MM)),
+        int(np.ceil(TOWER_MARGIN_MM / TOWER_CELL_MM)),
+    )
+    if spot is None:
+        return None
+    # wipe_tower_x/y place the tower itself; the brim lies around it.
+    return (
+        round(origin[0] + spot[0] * TOWER_CELL_MM + brim, 1),
+        round(origin[1] + spot[1] * TOWER_CELL_MM + brim, 1),
+    )
+
+
+def _prepare(
+    model: str | os.PathLike[str],
+    selection: Selection,
+    plate: int | None,
+    mapping: dict[int, int] | None,
+    folder: Path,
+    reduce_colours: bool = False,
+) -> _Prepared:
+    project = read_project(model)
+    number = _plate_number(project, plate)
+    assignment = assign_heads(
+        wanted_filaments(project, number),
+        heads_for(selection),
+        mapping,
+        reduce_to_heads=reduce_colours,
+    )
+    size, origin = _bed(selection)
+    copy = write_slicing_copy(
+        project,
+        number,
+        assignment.mapping(),
+        folder / f"plate{number}-cli.3mf",
+        bed_mm=size,
+        bed_origin_mm=origin,
+    )
+    notes = list(project.notes) + assignment.notes + copy.notes
+    if size is None:
+        notes.append(f"{selection.machine.name!r} has no printable area; bed fit unchecked.")
+    if project.printer and project.printer != selection.machine.name:
+        notes.append(
+            f"The project was saved for {project.printer!r}; it is sliced with "
+            f"{selection.machine.name!r} and its own presets are not used."
+        )
+    colours = _head_colours(selection, assignment)
+    return _Prepared(
+        project, number, assignment, copy.path, colours, notes, copy.bounds_mm, (size, origin)
+    )
+
+
+def _measure(run: SliceRun, assignment: HeadAssignment, selection: Selection, colours) -> tuple:
+    stats = tool_changes(run.gcode_path)
+    ratios = grams_per_mm(run.result)
+    heads = []
+    for index, preset in enumerate(selection.filaments):
+        used = [c.filament for c in assignment.choices if c.head == index]
+        grams = run.result.filament_used_g[index] if index < len(run.result.filament_used_g) else 0
+        if not used and grams == 0:
+            continue
+        heads.append(
+            HeadUsage(
+                head=index,
+                filament=preset.name,
+                colour=colours[index],
+                project_filaments=used,
+                total_g=grams,
+                prime_tower_g=to_grams({index: stats.prime_tower_mm.get(index, 0.0)}, ratios),
+                purge_g=to_grams({index: stats.purge_mm.get(index, 0.0)}, ratios),
+            )
+        )
+    notes = []
+    unexpected = [h.head for h in heads if not h.project_filaments and h.total_g > 0]
+    if unexpected:
+        notes.append(
+            f"Head(s) {['T' + str(h) for h in unexpected]} extrude although no project filament "
+            "is assigned to them (support or prime tower settings of the process preset)."
+        )
+    missing = [h.head for h in heads if h.project_filaments and h.total_g == 0]
+    if missing:
+        raise SliceError(
+            f"Head(s) {['T' + str(h) for h in missing]} are assigned filaments but the G-code "
+            f"uses none of them, so the slice ignored the assignment. Run dir: {run.run_dir}"
+        )
+    if stats.preextrude_macro_calls:
+        notes.append(
+            f"The G-code calls SM_PRINT_PREEXTRUDE_FILAMENT {stats.preextrude_macro_calls} times; "
+            "what the firmware extrudes there is not included (TO VERIFY ON HARDWARE)."
+        )
+    return stats, ratios, heads, notes
+
+
+def slice_project(
+    install: OrcaInstall,
+    model: str | os.PathLike[str],
+    selection: Selection,
+    *,
+    plate: int | None = None,
+    mapping: dict[int, int] | None = None,
+    reduce_colours: bool = False,
+    overrides: dict[str, OverrideValue] | None = None,
+    work_dir: str | os.PathLike[str] | None = None,
+    timeout_s: float = DEFAULT_TIMEOUT_S,
+) -> ProjectSlice:
+    """Slice one plate of a 3MF project on the selected printer.
+
+    Filaments are assigned to heads with `assign_heads` (`mapping` fixes some
+    or all: project filament number -> head index, 0 = T0; `reduce_colours`
+    merges the nearest colours when there are more than heads). A copy the CLI
+    can read is written into a fresh folder and sliced with `--arrange 0`;
+    tool changes, prime tower and purge are measured from the G-code.
+    """
+    base = to_windows_path(work_dir) if work_dir else default_work_dir()
+    folder = base / f"project-{datetime.now():%Y%m%d-%H%M%S}-{uuid.uuid4().hex[:6]}"
+    folder.mkdir(parents=True)
+    prepared = _prepare(model, selection, plate, mapping, folder, reduce_colours)
+    return _slice_prepared(install, prepared, selection, overrides, folder, timeout_s)
+
+
+def _slice_prepared(
+    install: OrcaInstall,
+    prepared: _Prepared,
+    selection: Selection,
+    overrides: dict[str, OverrideValue] | None,
+    folder: Path,
+    timeout_s: float,
+) -> ProjectSlice:
+    def run_once(extra: dict[str, list[str]] | None) -> SliceRun:
+        return slice_model(
+            install,
+            prepared.copy,
+            selection.machine,
+            selection.process,
+            selection.filaments,
+            work_dir=folder,
+            timeout_s=timeout_s,
+            overrides=SettingsOverrides.from_flat(overrides),
+            filament_colours=prepared.colours,
+            extra_args=list(PROJECT_CLI_ARGS),
+            process_extra=extra,
+        )
+
+    tower_notes = []
+    try:
+        run = run_once(None)
+    except SliceError as exc:
+        position = tower_position(prepared, selection) if TOWER_CONFLICT in str(exc) else None
+        if position is None:
+            raise
+        run = run_once({"wipe_tower_x": [str(position[0])], "wipe_tower_y": [str(position[1])]})
+        tower_notes.append(
+            f"The prime tower collided with an object at its default position, so it was "
+            f"moved to X {position[0]:g}, Y {position[1]:g} (first error: {str(exc)[:200]})."
+        )
+    stats, ratios, heads, notes = _measure(run, prepared.assignment, selection, prepared.colours)
+    notes = tower_notes + notes
+    result = ProjectSlice(
+        project=prepared.project.path,
+        plate=prepared.plate,
+        assignment=prepared.assignment,
+        slicing_copy=prepared.copy,
+        machine=run.machine,
+        process=run.process,
+        estimated_time_s=run.result.estimated_time_s,
+        total_filament_g=run.result.total_filament_g,
+        tool_changes=stats.tool_changes,
+        layers_with_changes=stats.layers_with_changes,
+        prime_tower_g=to_grams(stats.prime_tower_mm, ratios),
+        purge_g=to_grams(stats.purge_mm, ratios),
+        heads=heads,
+        toolpath=stats,
+        overrides=run.overrides,
+        gcode_path=run.gcode_path,
+        run_dir=run.run_dir,
+        notes=prepared.notes + notes,
+    )
+    (run.run_dir / "project_slice.json").write_text(
+        json.dumps(to_jsonable(result), indent=2, ensure_ascii=False), encoding="utf-8"
+    )
+    return result
+
+
+@dataclass
+class StrategyResult:
+    label: str
+    overrides: dict[str, OverrideValue]
+    slice: ProjectSlice | None
+    error: str | None  # why the slicer refused this variant
+    time_delta_s: int | None  # against the first variant that sliced
+    filament_delta_g: float | None
+
+
+@dataclass
+class StrategyComparison:
+    project: Path
+    plate: int
+    assignment: HeadAssignment
+    variants: list[StrategyResult]
+    fastest: str | None
+    least_filament: str | None
+    work_dir: Path
+    notes: list[str] = field(default_factory=list)
+
+
+def compare_strategies(
+    install: OrcaInstall,
+    model: str | os.PathLike[str],
+    selection: Selection,
+    *,
+    plate: int | None = None,
+    mapping: dict[int, int] | None = None,
+    reduce_colours: bool = False,
+    variants: list[Variant] | None = None,
+    work_dir: str | os.PathLike[str] | None = None,
+    timeout_s: float = DEFAULT_TIMEOUT_S,
+) -> StrategyComparison:
+    """Slice one plate once per variant (default `U1_VARIANTS`) with the same
+    head assignment and compare time, filament, tool changes and prime tower.
+
+    Overrides are checked before the first slice. A variant the slicer refuses
+    (for example one object at a time without enough clearance) is reported
+    with its error instead of stopping the comparison.
+    """
+    variants = list(variants) if variants else list(U1_VARIANTS)
+    for variant in variants:
+        try:
+            prepare_cli_settings(
+                selection.machine,
+                selection.process,
+                selection.filaments,
+                SettingsOverrides.from_flat(variant.overrides),
+            )
+        except SliceError as exc:
+            raise SliceError(f"Variant {variant.display_label()!r}: {exc}") from exc
+
+    base = to_windows_path(work_dir) if work_dir else default_work_dir()
+    folder = base / f"strategies-{datetime.now():%Y%m%d-%H%M%S}-{uuid.uuid4().hex[:6]}"
+    folder.mkdir(parents=True)
+    prepared = _prepare(model, selection, plate, mapping, folder, reduce_colours)
+    if len(prepared.project.plate_objects(prepared.plate)) < 2:
+        variants = [v for v in variants if v.overrides.get("print_sequence") != "by object"]
+
+    results: list[StrategyResult] = []
+    for variant in variants:
+        try:
+            sliced = _slice_prepared(
+                install, prepared, selection, variant.overrides, folder, timeout_s
+            )
+        except SliceError as exc:
+            results.append(
+                StrategyResult(
+                    variant.display_label(), variant.overrides, None, str(exc), None, None
+                )
+            )
+            continue
+        base_slice = next((r.slice for r in results if r.slice), None)
+        results.append(
+            StrategyResult(
+                label=variant.display_label(),
+                overrides=sliced.overrides,
+                slice=sliced,
+                error=None,
+                time_delta_s=sliced.estimated_time_s - base_slice.estimated_time_s
+                if base_slice
+                else 0,
+                filament_delta_g=round(sliced.total_filament_g - base_slice.total_filament_g, 2)
+                if base_slice
+                else 0.0,
+            )
+        )
+    done = [r for r in results if r.slice]
+    if not done:
+        raise SliceError(
+            "Every variant failed:\n" + "\n".join(f"- {r.label}: {r.error}" for r in results)
+        )
+    notes = list(prepared.notes)
+    if any(v.overrides.get("enable_prime_tower") is False for v in variants):
+        notes.append(NO_PRIME_TOWER_NOTE)
+    if any(v.overrides.get("print_sequence") == "by object" for v in variants):
+        notes.append(BY_OBJECT_NOTE)
+    comparison = StrategyComparison(
+        project=prepared.project.path,
+        plate=prepared.plate,
+        assignment=prepared.assignment,
+        variants=results,
+        fastest=min(done, key=lambda r: r.slice.estimated_time_s).label,  # type: ignore[union-attr]
+        least_filament=min(done, key=lambda r: r.slice.total_filament_g).label,  # type: ignore[union-attr]
+        work_dir=folder,
+        notes=notes,
+    )
+    (folder / "strategies.json").write_text(
+        json.dumps(to_jsonable(comparison), indent=2, ensure_ascii=False), encoding="utf-8"
+    )
+    return comparison
+
+
+# Written into the project's `Application` metadata when the app version is
+# unknown. The loader treats `Snapmaker_Orca-<version>` as its own project
+# format (bbs_3mf.cpp, v2.4.0).
+APPLICATION_PREFIX = "Snapmaker_Orca-"
+
+
+@dataclass
+class ExportedProject:
+    path: Path
+    source: Path
+    plate: int
+    assignment: HeadAssignment
+    machine: str
+    process: str
+    filaments: list[str]
+    overrides: dict[str, OverrideValue]
+    notes: list[str] = field(default_factory=list)
+
+
+def export_project(
+    install: OrcaInstall,
+    model: str | os.PathLike[str],
+    selection: Selection,
+    out_path: str | os.PathLike[str],
+    *,
+    plate: int | None = None,
+    mapping: dict[int, int] | None = None,
+    reduce_colours: bool = False,
+    overrides: dict[str, OverrideValue] | None = None,
+    work_dir: str | os.PathLike[str] | None = None,
+) -> ExportedProject:
+    """Write one plate of a project as a new 3MF for Snapmaker Orca: objects
+    centred on the bed, filaments assigned to heads like `slice_project`, and
+    the selected presets (with `overrides`) as the project settings.
+
+    `out_path` must not exist; the source file is never changed.
+    """
+    out = to_windows_path(out_path)
+    source = to_windows_path(model)
+    if out.exists():
+        raise SliceError(f"{out} already exists; choose a new file name.")
+    if out.resolve() == source.resolve():
+        raise SliceError("The output must be a new file, not the source project.")
+    base = to_windows_path(work_dir) if work_dir else default_work_dir()
+    folder = base / f"export-{datetime.now():%Y%m%d-%H%M%S}-{uuid.uuid4().hex[:6]}"
+    folder.mkdir(parents=True)
+    prepared = _prepare(source, selection, plate, mapping, folder, reduce_colours)
+    machine_s, process_s, filament_s = prepare_cli_settings(
+        selection.machine,
+        selection.process,
+        selection.filaments,
+        SettingsOverrides.from_flat(overrides),
+    )
+    settings = project_settings(
+        machine_s,
+        process_s,
+        filament_s,
+        machine_name=selection.machine.name,
+        process_name=selection.process.name,
+        filament_names=[f.name for f in selection.filaments],
+        colours=prepared.colours,
+    )
+    version = None
+    with contextlib.suppress(PrintCopilotError):
+        version = current_setup(default_conf_path(install.data_dir)).app_version
+    notes = list(prepared.notes)
+    if not version:
+        notes.append("App version unknown; the project is tagged without a version number.")
+    write_app_project(
+        prepared.copy,
+        out,
+        application=f"{APPLICATION_PREFIX}{version or '0.0.0'}",
+        object_ids=[o.id for o in prepared.project.plate_objects(prepared.plate)],
+        settings=settings,
+    )
+    return ExportedProject(
+        path=out,
+        source=source,
+        plate=prepared.plate,
+        assignment=prepared.assignment,
+        machine=selection.machine.name,
+        process=selection.process.name,
+        filaments=[f.name for f in selection.filaments],
+        overrides=SettingsOverrides.from_flat(overrides).to_flat(),
+        notes=notes,
+    )
+
+
+def open_in_app(install: OrcaInstall, project: str | os.PathLike[str]) -> list[str]:
+    """Start Snapmaker Orca with `project` and return the command. The app
+    runs on its own; nothing waits for it."""
+    path = to_windows_path(project)
+    if not path.is_file():
+        raise SliceError(f"Project file not found: {path}")
+    command = [str(install.exe), cli_path(path)]
+    flags = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(
+        subprocess, "CREATE_NEW_PROCESS_GROUP", 0
+    )
+    try:
+        subprocess.Popen(
+            command,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            creationflags=flags,
+            close_fds=True,
+        )
+    except OSError as exc:
+        raise SliceError(f"Could not start Snapmaker Orca ({install.exe}): {exc}") from exc
+    return command

@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from print_copilot import __version__, actions
+from print_copilot import __version__, actions, multicolor
 from print_copilot.errors import ModelError, PrintCopilotError, SliceError
 from print_copilot.model.orientation import GOALS, OrientationAnalysis, Region
 from print_copilot.model.render import VIEWS
@@ -389,6 +389,175 @@ def cmd_render(args: argparse.Namespace) -> int:
     return 0
 
 
+def parse_mapping(items: list[str] | None) -> dict[int, int] | None:
+    """`["5=T1", "6=2"]` (project filament = tool head) to {5: 1, 6: 2}."""
+    result: dict[int, int] = {}
+    for key, value in parse_assignments(items, what="mapping").items():
+        head = value.upper().removeprefix("T")
+        if not key.isdigit() or not head.isdigit():
+            raise SliceError(
+                f"Invalid mapping {key}={value}: expected FILAMENT=T<head>, e.g. 5=T1."
+            )
+        result[int(key)] = int(head)
+    return result or None
+
+
+def _project_selection(args: argparse.Namespace) -> tuple[Any, actions.Selection]:
+    install = locate(args.orca_exe, args.orca_data)
+    library = PresetLibrary(install.data_dir, vendor=args.vendor)
+    return install, _selection(args, library)
+
+
+def _print_assignment(assignment: Any) -> None:
+    for c in assignment.choices:
+        distance = "" if c.delta_e is None else f", delta E {c.delta_e:g}"
+        how = "given" if c.explicit else "chosen"
+        print(
+            f"    filament {c.filament} ({c.project_colour or '?'} {c.project_type or ''}) -> "
+            f"T{c.head} {c.head_filament} ({c.head_colour or '?'}{distance}) [{how}]"
+        )
+
+
+def cmd_project(args: argparse.Namespace) -> int:
+    selection = None
+    if not args.no_presets:
+        _, selection = _project_selection(args)
+    summary = multicolor.inspect_project(args.model, selection, reduce_colours=args.reduce_colours)
+    if args.json:
+        _print_json(summary)
+        return 0
+    print(f"Project {summary.project}")
+    print(f"  saved by : {summary.application}")
+    print(f"  printer  : {summary.printer}")
+    for head in summary.heads:
+        print(f"  T{head.index}       : {head.filament} ({head.colour or '?'}, {head.type})")
+    for plate in summary.plates:
+        name = f" '{plate.name}'" if plate.name else ""
+        print(f"  plate {plate.number}{name}: {len(plate.objects)} object(s)")
+        used = ", ".join(f"{w.number} {w.colour or '?'} {w.type or ''}" for w in plate.filaments)
+        print(f"    filaments: {used}")
+        if plate.assignment:
+            _print_assignment(plate.assignment)
+        if plate.assignment_error:
+            print(f"    no assignment: {plate.assignment_error}")
+    for note in summary.notes:
+        print(f"note: {note}")
+    return 0
+
+
+def _print_project_slice(r: Any) -> None:
+    print(f"Plate {r.plate} of {r.project} sliced: {r.gcode_path}")
+    print(f"  printer   : {r.machine}")
+    print(f"  process   : {r.process}")
+    _print_assignment(r.assignment)
+    print(f"  time      : {format_duration(r.estimated_time_s)} ({r.estimated_time_s} s)")
+    print(f"  filament  : {r.total_filament_g:.2f} g")
+    print(f"  changes   : {r.tool_changes} tool changes on {r.layers_with_changes} layers")
+    print(f"  tower     : {r.prime_tower_g:.2f} g prime tower, {r.purge_g:.2f} g of it purge")
+    for h in r.heads:
+        print(
+            f"  T{h.head}        : {h.total_g:.2f} g ({h.filament}, {h.colour}), "
+            f"tower {h.prime_tower_g:.2f} g, filaments {h.project_filaments}"
+        )
+    for note in r.notes:
+        print(f"note: {note}")
+
+
+def cmd_slice_project(args: argparse.Namespace) -> int:
+    install, selection = _project_selection(args)
+    result = multicolor.slice_project(
+        install,
+        args.model,
+        selection,
+        plate=args.plate,
+        mapping=parse_mapping(args.map),
+        reduce_colours=args.reduce_colours,
+        overrides=parse_assignments(args.set),
+        work_dir=args.work_dir,
+        timeout_s=args.timeout,
+    )
+    if args.json:
+        _print_json(result)
+    else:
+        _print_project_slice(result)
+    return 0
+
+
+def cmd_strategies(args: argparse.Namespace) -> int:
+    install, selection = _project_selection(args)
+    variants = _load_variants(args) if (args.variant or args.variants_file) else None
+    comparison = multicolor.compare_strategies(
+        install,
+        args.model,
+        selection,
+        plate=args.plate,
+        mapping=parse_mapping(args.map),
+        reduce_colours=args.reduce_colours,
+        variants=variants,
+        work_dir=args.work_dir,
+        timeout_s=args.timeout,
+    )
+    if args.json:
+        _print_json(comparison)
+        return 0
+    print(f"Plate {comparison.plate} of {comparison.project}")
+    _print_assignment(comparison.assignment)
+    print(
+        f"{'strategy':<26} {'time':>10} {'d time':>8} {'grams':>8} {'d g':>8} "
+        f"{'changes':>8} {'tower g':>8}"
+    )
+    for v in comparison.variants:
+        if v.slice is None:
+            reason = (v.error or "").strip().splitlines()
+            print(f"{v.label[:26]:<26} failed: {reason[-1][:200] if reason else ''}")
+            continue
+        r = v.slice
+        print(
+            f"{v.label[:26]:<26} {format_duration(r.estimated_time_s):>10} {v.time_delta_s:>+8d} "
+            f"{r.total_filament_g:>8.2f} {v.filament_delta_g:>+8.2f} {r.tool_changes:>8d} "
+            f"{r.prime_tower_g:>8.2f}"
+        )
+    print(f"fastest: {comparison.fastest}; least filament: {comparison.least_filament}")
+    print("All numbers are the slicer's own figures from each G-code.")
+    for v in comparison.variants:
+        if v.error:
+            print(f"failed {v.label}: {v.error}")
+    for note in comparison.notes:
+        print(f"note: {note}")
+    return 0
+
+
+def cmd_export_project(args: argparse.Namespace) -> int:
+    install, selection = _project_selection(args)
+    exported = multicolor.export_project(
+        install,
+        args.model,
+        selection,
+        args.out,
+        plate=args.plate,
+        mapping=parse_mapping(args.map),
+        reduce_colours=args.reduce_colours,
+        overrides=parse_assignments(args.set),
+        work_dir=args.work_dir,
+    )
+    opened = multicolor.open_in_app(install, exported.path) if args.open else None
+    if args.json:
+        data = to_jsonable(exported)
+        data["opened_with"] = opened
+        _print_json(data)
+        return 0
+    print(f"Project written: {exported.path}")
+    print(f"  plate {exported.plate} of {exported.source}")
+    print(f"  printer   : {exported.machine}")
+    print(f"  process   : {exported.process}")
+    _print_assignment(exported.assignment)
+    for note in exported.notes:
+        print(f"note: {note}")
+    if opened:
+        print("Opened in Snapmaker Orca.")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="print-copilot",
@@ -563,6 +732,66 @@ def build_parser() -> argparse.ArgumentParser:
         help="do not read Snapmaker Orca presets (support threshold 30 degrees)",
     )
     r.set_defaults(func=cmd_render)
+
+    project_opts = argparse.ArgumentParser(add_help=False)
+    project_opts.add_argument(
+        "--plate", type=int, help="plate number (1-based; needed when the project has several)"
+    )
+    project_opts.add_argument(
+        "--map",
+        action="append",
+        metavar="FILAMENT=T<head>",
+        help="put a project filament on a tool head, e.g. 5=T1; several filaments may share a "
+        "head; repeatable (default: nearest loaded colour)",
+    )
+    project_opts.add_argument(
+        "--reduce-colours",
+        action="store_true",
+        help="when a plate uses more filaments than heads, merge the nearest colours (heuristic)",
+    )
+
+    pj = sub.add_parser(
+        "project",
+        parents=[common, slicing, project_opts],
+        help="show plates, objects and filaments of a 3MF project and the proposed tool heads",
+    )
+    pj.add_argument("--orca-exe", help="path to snapmaker-orca.exe")
+    pj.add_argument(
+        "--no-presets", action="store_true", help="do not read Snapmaker Orca (no head proposal)"
+    )
+    pj.set_defaults(func=cmd_project)
+
+    sp = sub.add_parser(
+        "slice-project",
+        parents=[common, slicing, running, project_opts],
+        help="slice one plate of a 3MF project on the U1 and measure tool changes",
+    )
+    sp.add_argument("--set", action="append", metavar="KEY=VALUE", help="as for slice")
+    sp.set_defaults(func=cmd_slice_project)
+
+    sg = sub.add_parser(
+        "strategies",
+        parents=[common, slicing, running, project_opts],
+        help="compare prime tower / print order strategies for one plate of a 3MF project",
+    )
+    sg.add_argument(
+        "--variant",
+        action="append",
+        metavar="KEY=VALUE;...",
+        help="custom strategy instead of the default set (as for compare); repeatable",
+    )
+    sg.add_argument("--variants-file", help="as for compare")
+    sg.set_defaults(func=cmd_strategies)
+
+    ep = sub.add_parser(
+        "export-project",
+        parents=[common, slicing, running, project_opts],
+        help="write one plate as a new 3MF project for Snapmaker Orca with the U1 presets",
+    )
+    ep.add_argument("--out", required=True, help="new .3mf file to write (never overwritten)")
+    ep.add_argument("--set", action="append", metavar="KEY=VALUE", help="as for slice")
+    ep.add_argument("--open", action="store_true", help="open the written project in the app")
+    ep.set_defaults(func=cmd_export_project)
     return parser
 
 

@@ -22,7 +22,7 @@ from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import ToolAnnotations
 from pydantic import BaseModel, Field
 
-from print_copilot import __version__, actions
+from print_copilot import __version__, actions, multicolor
 from print_copilot.errors import PrintCopilotError
 from print_copilot.model.orientation import Region
 from print_copilot.orca.install import locate, locate_data_dir
@@ -48,7 +48,16 @@ Look before you decide: render_model shows the model as an image. If some
 surface must print cleanly (a miniature's face, text, the side that will be
 seen), pass it as a protect region with goal="quality", then render the
 recommended down_vector with the same regions to check it. Tell the user which
-numbers are measured by the slicer and which are heuristic."""
+numbers are measured by the slicer and which are heuristic.
+Multi-colour 3MF projects (from Snapmaker Orca, Bambu Studio, MakerWorld or
+Printables): inspect_project shows plates, the filaments each plate uses and the
+tool head proposed for each from the colours loaded on the U1. slice_project
+slices one plate and measures tool changes, prime tower and purge;
+compare_strategies tries the prime tower off and one object at a time;
+export_project writes the plate as a new project for the app and can open it.
+On the U1 the purge matrix has no effect: what costs time and material is the
+number of tool changes and the prime tower. If the plate's colours are not the
+loaded ones, tell the user which filament to load on which head."""
 
 server = MCPServer(name="snapmaker-print-copilot", version=__version__, instructions=INSTRUCTIONS)
 
@@ -338,6 +347,173 @@ def render_model(
     result.notes = selection.notes + result.notes
     text = json.dumps(to_jsonable(result), indent=1, ensure_ascii=False)
     return [text, Image(data=result.png_path.read_bytes(), format="png")]
+
+
+def _project_selection(
+    printer: str | None, process: str | None, filaments: list[str] | None
+) -> tuple[Any, actions.Selection]:
+    install = locate()
+    selection = actions.select_presets(
+        PresetLibrary(install.data_dir), printer=printer, process=process, filaments=filaments
+    )
+    return install, selection
+
+
+def _mapping(mapping: dict[str, int] | None) -> dict[int, int] | None:
+    if not mapping:
+        return None
+    try:
+        return {int(k): int(v) for k, v in mapping.items()}
+    except ValueError as exc:
+        raise ToolError(
+            'mapping keys are project filament numbers and values head indexes, e.g. {"5": 1}.'
+        ) from exc
+
+
+@server.tool(annotations=READ_ONLY)
+@_tool_errors
+def inspect_project(
+    model: str,
+    printer: str | None = None,
+    filaments: list[str] | None = None,
+    reduce_colours: bool = False,
+) -> dict[str, Any]:
+    """Read a 3MF project without slicing: who saved it, for which printer, its
+    plates, the objects and filaments (number, colour, type) each plate uses,
+    and for each plate the proposed U1 tool head per filament (nearest loaded
+    colour, CIE76 delta E heuristic; identical colours share a head).
+
+    model: absolute path of the .3mf.
+    reduce_colours: merge the nearest colours when a plate needs more filaments
+        than there are heads (heuristic; otherwise such a plate gets an error
+        with the closest colour pairs).
+    """
+    _, selection = _project_selection(printer, None, filaments)
+    summary = multicolor.inspect_project(model, selection, reduce_colours=reduce_colours)
+    data = to_jsonable(summary)
+    data["notes"] = selection.notes + data["notes"]
+    return data
+
+
+@server.tool(annotations=SLICING)
+@_tool_errors
+def slice_project(
+    model: str,
+    plate: int | None = None,
+    mapping: dict[str, int] | None = None,
+    reduce_colours: bool = False,
+    overrides: dict[str, OverrideValue] | None = None,
+    printer: str | None = None,
+    process: str | None = None,
+    filaments: list[str] | None = None,
+) -> dict[str, Any]:
+    """Slice one plate of a 3MF project on the U1 and return measured time,
+    grams per head, tool changes, layers with changes, prime tower and purge
+    grams, plus the head assignment used.
+
+    plate: 1-based; required when the project has several plates.
+    mapping: project filament number -> head index (0 = T0), e.g. {"5": 1};
+        several filaments may share a head. Unmapped filaments get the nearest
+        loaded colour.
+    overrides, printer, process, filaments: as for slice.
+    """
+    install, selection = _project_selection(printer, process, filaments)
+    result = multicolor.slice_project(
+        install,
+        model,
+        selection,
+        plate=plate,
+        mapping=_mapping(mapping),
+        reduce_colours=reduce_colours,
+        overrides=overrides,
+    )
+    data = to_jsonable(result)
+    data["notes"] = selection.notes + data["notes"]
+    return data
+
+
+@server.tool(annotations=SLICING)
+@_tool_errors
+def compare_strategies(
+    model: str,
+    plate: int | None = None,
+    mapping: dict[str, int] | None = None,
+    reduce_colours: bool = False,
+    variants: list[VariantSpec] | None = None,
+    printer: str | None = None,
+    process: str | None = None,
+    filaments: list[str] | None = None,
+) -> dict[str, Any]:
+    """Slice one plate of a project once per tool-change strategy and compare
+    measured time, grams, tool changes and prime tower grams. Default
+    strategies: presets as is, no prime tower, one object at a time (only with
+    two or more objects). A strategy the slicer refuses is listed with its
+    error. Quality effects (ooze without a tower) are not measured: say so.
+
+    variants: custom strategies instead, same format as compare_variants.
+    Other arguments: as for slice_project.
+    """
+    install, selection = _project_selection(printer, process, filaments)
+    specs = (
+        [actions.Variant(overrides=dict(v.overrides), label=v.label) for v in variants]
+        if variants
+        else None
+    )
+    result = multicolor.compare_strategies(
+        install,
+        model,
+        selection,
+        plate=plate,
+        mapping=_mapping(mapping),
+        reduce_colours=reduce_colours,
+        variants=specs,
+    )
+    data = to_jsonable(result)
+    data["notes"] = selection.notes + data["notes"]
+    return data
+
+
+@server.tool(
+    annotations=ToolAnnotations(
+        read_only_hint=False, destructive_hint=False, idempotent_hint=False, open_world_hint=False
+    )
+)
+@_tool_errors
+def export_project(
+    model: str,
+    out_path: str,
+    plate: int | None = None,
+    mapping: dict[str, int] | None = None,
+    reduce_colours: bool = False,
+    overrides: dict[str, OverrideValue] | None = None,
+    open_in_app: bool = False,
+    printer: str | None = None,
+    process: str | None = None,
+    filaments: list[str] | None = None,
+) -> dict[str, Any]:
+    """Write one plate of a project as a NEW 3MF for Snapmaker Orca: objects
+    centred on the U1 bed, filaments on the chosen heads, the selected presets
+    (with overrides) as project settings. With open_in_app, start Snapmaker Orca
+    with it so the user can check and adjust it. Never overwrites a file.
+
+    out_path: absolute path of the new .3mf (must not exist).
+    Other arguments: as for slice_project.
+    """
+    install, selection = _project_selection(printer, process, filaments)
+    exported = multicolor.export_project(
+        install,
+        model,
+        selection,
+        out_path,
+        plate=plate,
+        mapping=_mapping(mapping),
+        reduce_colours=reduce_colours,
+        overrides=overrides,
+    )
+    data = to_jsonable(exported)
+    data["notes"] = selection.notes + data["notes"]
+    data["opened_with"] = multicolor.open_in_app(install, exported.path) if open_in_app else None
+    return data
 
 
 def main() -> None:

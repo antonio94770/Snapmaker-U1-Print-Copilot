@@ -25,12 +25,16 @@ def test_server_lists_the_tools() -> None:
     tools = asyncio.run(mcp_server.server.list_tools())
     assert sorted(t.name for t in tools) == [
         "analyze_model",
+        "compare_strategies",
         "compare_variants",
+        "export_project",
         "get_current_setup",
+        "inspect_project",
         "list_presets",
         "optimize_orientation",
         "render_model",
         "slice",
+        "slice_project",
     ]
     for tool in tools:
         assert tool.description

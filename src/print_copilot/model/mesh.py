@@ -244,8 +244,9 @@ def _root_model_part(archive: zipfile.ZipFile) -> str:
     return DEFAULT_MODEL_PATH
 
 
-def load_3mf(path: str | os.PathLike[str]) -> Mesh:
-    """Read every build item of a 3MF file into one mesh, in plate coordinates."""
+def load_3mf_items(path: str | os.PathLike[str]) -> list[tuple[str, np.ndarray]]:
+    """`(objectid, triangles)` for every build item of a 3MF file, the
+    triangles in plate coordinates (mm)."""
     mf_path = Path(path)
     try:
         archive = zipfile.ZipFile(mf_path)
@@ -258,11 +259,20 @@ def load_3mf(path: str | os.PathLike[str]) -> Mesh:
         items = list(root.iterfind(f"{{{CORE_NS}}}build/{{{CORE_NS}}}item"))
         if not items:
             raise ModelError(f"{mf_path}: the 3MF build section lists no objects.")
-        parts = []
+        result = []
         for item in items:
             target = item.get(f"{{{PRODUCTION_NS}}}path") or root_part
-            triangles = reader.object_triangles(target, item.get("objectid", ""))
-            parts.append(_apply(_parse_transform(item.get("transform")), triangles))
+            object_id = item.get("objectid", "")
+            triangles = reader.object_triangles(target, object_id)
+            result.append((object_id, _apply(_parse_transform(item.get("transform")), triangles)))
+    return result
+
+
+def load_3mf(path: str | os.PathLike[str]) -> Mesh:
+    """Read every build item of a 3MF file into one mesh, in plate coordinates."""
+    mf_path = Path(path)
+    items = load_3mf_items(mf_path)
+    parts = [triangles for _, triangles in items]
     mesh = Mesh(np.concatenate(parts), source=mf_path, object_count=len(items))
     if len(items) > 1:
         mesh.notes.append(

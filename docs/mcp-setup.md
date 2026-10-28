@@ -36,6 +36,10 @@ Optional environment variables (the same ones the CLI reads):
 | `analyze_model` | ranks candidate orientations of an STL/3MF with a geometric overhang heuristic (no slicing) | `print-copilot analyze` |
 | `optimize_orientation` | slices the best candidate orientations with each support mode (none / normal / tree) and recommends one for the goal (speed, quality, min_support) | `print-copilot orient` |
 | `render_model` | returns a PNG of labelled views (as loaded or in a print orientation) with bed contact, supports and protected surfaces coloured, so the agent can look at the model | `print-copilot render` |
+| `inspect_project` | reads a 3MF project (Snapmaker Orca, Bambu Studio, PrusaSlicer): plates, objects, the filaments each plate uses, and the U1 tool head proposed for each from the loaded colours | `print-copilot project` |
+| `slice_project` | slices one plate of a project on the U1 with that head assignment and returns time, grams per head, tool changes, prime tower and purge grams | `print-copilot slice-project` |
+| `compare_strategies` | slices one plate with the prime tower on/off and one object at a time, and compares the measured results | `print-copilot strategies` |
+| `export_project` | writes the plate as a new 3MF for Snapmaker Orca with the U1 presets and heads, and can open it in the app | `print-copilot export-project` |
 
 None of these tools talk to the printer. Overrides use preset JSON keys
 (`sparse_infill_density`, `wall_loops`, ...). A key without a prefix is a
@@ -52,6 +56,14 @@ For models where one surface matters (a miniature's face, text), the agent
 renders the model, chooses `protect` regions from the image (direction and/or
 a box in mm read off the grid), runs `optimize_orientation` with
 `goal="quality"` and renders the recommended `down_vector` to check it.
+
+Multi-colour projects: the agent starts with `inspect_project`, tells the user
+which colour to load on which head when the loaded ones differ (the notes
+give the CIE76 colour distance, a heuristic), slices or compares strategies,
+and finishes with `export_project` (`open_in_app=true`) so the user sees the
+result in Snapmaker Orca. A plate that needs more colours than the U1 has
+heads fails with the closest colour pairs; `mapping` or `reduce_colours`
+decide which colours share a head.
 
 Slicing a small model takes about a second, but large models can take minutes.
 Raise the client's tool timeout if slices get cut off (see below).
@@ -124,3 +136,7 @@ npx @modelcontextprotocol/inspector "C:\Users\you\Snapmaker_Print_Copilot\.venv\
   orientation that keeps the face free of support marks."
 - "Compare 15%, 25% and 40% infill and 2 vs 4 walls for the bracket and
   recommend the cheapest variant that keeps 4 walls."
+- "I downloaded `C:\models\mask.3mf` from MakerWorld. Which plates can my U1
+  print with the colours I have loaded, and what should I swap?"
+- "Slice plate 2 of the mask, compare it with and without the prime tower,
+  then write the faster version as a project and open it in Snapmaker Orca."

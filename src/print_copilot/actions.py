@@ -43,6 +43,7 @@ from print_copilot.model.render import (
 from print_copilot.orca.conf import CurrentSetup, current_setup, default_conf_path
 from print_copilot.orca.install import OrcaInstall, to_windows_path
 from print_copilot.orca.presets import KINDS, Preset, PresetKind, PresetLibrary
+from print_copilot.orca.project import is_project
 from print_copilot.orca.slicer import (
     DEFAULT_TIMEOUT_S,
     OverrideValue,
@@ -118,6 +119,9 @@ class Selection:
     process: Preset
     filaments: list[Preset]
     notes: list[str] = field(default_factory=list)
+    # Colour loaded on each head, from Snapmaker_Orca.conf; None when the
+    # filaments were not taken from there.
+    colours: list[str] | None = None
 
 
 def select_presets(
@@ -146,12 +150,15 @@ def select_presets(
             raise SliceError(f"{CONF_SOURCE} has no process selected for {printer!r}.")
         process = setup.process
         notes.append(f"process {process!r} from {CONF_SOURCE}")
+    colours: list[str] | None = None
     if not filaments:
         assert setup is not None
         if not setup.filaments:
             raise SliceError(f"{CONF_SOURCE} has no filaments selected for {printer!r}.")
         filaments = setup.filaments
         notes.append(f"filaments {filaments} from {CONF_SOURCE}")
+        if len(setup.filament_colors) == len(filaments):
+            colours = list(setup.filament_colors)
 
     machine_p = library.resolve("machine", printer)
     process_p = library.resolve("process", process)
@@ -161,7 +168,9 @@ def select_presets(
         # The slicer needs one filament per head (HANDOFF.md section 4, gotcha 7).
         filament_p = filament_p * heads
         notes.append(f"using {filaments[0]!r} on all {heads} tool heads")
-    return Selection(machine=machine_p, process=process_p, filaments=filament_p, notes=notes)
+    return Selection(
+        machine=machine_p, process=process_p, filaments=filament_p, notes=notes, colours=colours
+    )
 
 
 def run_slice(
@@ -173,6 +182,13 @@ def run_slice(
     work_dir: str | os.PathLike[str] | None = None,
     timeout_s: float = DEFAULT_TIMEOUT_S,
 ) -> SliceRun:
+    path = Path(model)
+    if path.suffix.lower() == ".3mf" and path.is_file() and is_project(path):
+        raise ModelError(
+            f"{path.name} is a slicer project; the Snapmaker Orca CLI crashes when given it "
+            "directly (see orca/project.py). Use slice-project (MCP: slice_project), which "
+            "slices one plate from a copy the CLI can read."
+        )
     return slice_model(
         install,
         model,

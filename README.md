@@ -6,8 +6,9 @@ An AI agent (Claude Code, Codex, Claude Desktop, ...) or a person at the
 terminal can list presets, slice a model headlessly and compare the measured
 results.
 
-Status: early development (milestone M3, "model analysis"). U1 tool assignment,
-`.3mf` project writing and printer control are planned, see `HANDOFF.md`.
+Status: early development (milestone M4, "U1 specifics"): presets, headless
+slicing, orientation search and multi-colour 3MF projects work; printer
+control is planned, see `HANDOFF.md`.
 
 To use it from Claude Code, Codex or Claude Desktop, see
 [docs/mcp-setup.md](docs/mcp-setup.md).
@@ -108,6 +109,42 @@ than elsewhere, layer steps less) and puts orientations that stand on an edge
 or a point last. An AI agent uses the same steps through MCP: it looks at the
 rendered image, decides which surface is the face, and checks the result.
 
+## Multi-colour projects on the U1
+
+3MF projects saved by Snapmaker Orca or Bambu Studio (for example downloads
+from MakerWorld or Printables) are read with their plates, per-object and
+per-part filaments and painted colours. Each filament a plate uses is put on
+the U1 head whose loaded colour is closest (CIE76 delta E, a heuristic);
+filaments of the same colour share a head, and you can fix any of them with
+`--map FILAMENT=T<head>`:
+
+```bash
+print-copilot project mask.3mf
+print-copilot slice-project mask.3mf --plate 2
+print-copilot slice-project mask.3mf --plate 1 --map 1=T2 --map 8=T3
+print-copilot strategies mask.3mf --plate 7
+print-copilot export-project mask.3mf --plate 2 --out mask-plate2-u1.3mf --open
+```
+
+`slice-project` reports the slicer's time and grams per head plus what it
+measures in the G-code: tool changes, layers with changes, prime tower and
+purge grams. `strategies` slices the same plate as is, without the prime tower
+and one object at a time. `export-project` writes a new 3MF with the U1
+presets and opens it in Snapmaker Orca. A plate that needs more colours than
+the four heads stops with the closest colour pairs; `--map` or
+`--reduce-colours` decide which colours share a head.
+
+On the U1 every head has its own nozzle, so the purge matrix does not change
+the slice (verified); what costs time and material is the number of tool
+changes and the prime tower. After the painting-remapping fix, the Spider-Man
+project (four filaments in two colours, identical colours sharing a head) was
+measured with 0.20 mm Standard layers and Generic PLA on 01.10.01.50:
+4 h 42 min, 79.9 g and 353 tool changes, with the prime tower enabled.
+The earlier 0.08 mm strategy comparison predates that fix and has been removed;
+it must be measured again before being used as a performance example.
+Print quality without the prime tower and the firmware's own pre-extrusion
+consumption remain unverified on hardware.
+
 ## How slicing works
 
 The Snapmaker Orca command line needs a few workarounds, found by testing
@@ -121,7 +158,14 @@ The Snapmaker Orca command line needs a few workarounds, found by testing
 - every override is checked against the config block of the G-code, because
   the CLI silently replaces values it does not accept;
 - the output folder must stay within 229 characters, or the CLI cannot write
-  the G-code.
+  the G-code;
+- 3MF projects are sliced from a copy without plates and without the
+  `Application` tag (the 01.10.01.50 CLI crashes on both), with the objects
+  of one plate centred on the bed and `--arrange 0`;
+- each head's colour is passed in its filament preset, otherwise the slicer
+  drops painted colours;
+- if the prime tower collides with an object, it is moved to a free corner
+  and a note says so.
 
 Your Snapmaker Orca installation and presets are only read, never modified.
 
@@ -132,8 +176,11 @@ ruff check . && ruff format --check .
 pytest
 ```
 
-The integration tests slice a 20 mm cube and a T-shaped part and are skipped when Snapmaker Orca is
-not installed.
+The integration tests slice a 20 mm cube, a T-shaped part and a synthetic
+multi-colour project, and are skipped when Snapmaker Orca is not installed.
+Tests on real downloaded projects run when `PRINT_COPILOT_TEST_PROJECTS`
+points to a folder filled by `python research/m4-probe/download_projects.py <folder>`
+(the files are not in the repository; their licences vary).
 
 ## License
 

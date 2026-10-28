@@ -42,9 +42,24 @@ MAX_OUTPUT_DIR_CHARS = 229
 
 # Process keys removed before slicing because they crash the CLI.
 # `wipe_tower_filament = "0"` in the U1 process presets segfaults the CLI
-# (found by key bisection, HANDOFF.md section 4, gotcha 5). The effect of
-# dropping it on multi-colour prints is TO VERIFY IN SNAPMAKER ORCA.
+# (found by key bisection, HANDOFF.md section 4, gotcha 5). Dropping it is
+# harmless: the G-code config block of multi-tool slices still shows
+# `wipe_tower_filament = 0`, the default (verified on 01.10.01.50).
 CRASHING_PROCESS_KEYS: tuple[str, ...] = ("wipe_tower_filament",)
+
+# Without `filament_colour` in the filament presets the CLI keeps a single
+# default colour, and the multi-colour segmentation then drops every painted
+# state above 1 ("dropping painted states above segmentation range ...
+# physical_filaments=1" in the log; MultiMaterialSegmentation.cpp counts
+# filaments by `filament_colour`). Verified on 01.10.01.50: a painted project
+# printed only T0 until each head's colour was set.
+FILAMENT_COLOUR_KEY = "filament_colour"
+
+# Process keys the U1 presets leave at the slicer default but that can be set
+# for a run: the prime tower position (one value per plate). Passing them in
+# the process JSON works: the G-code config block shows the new values
+# (verified on 01.10.01.50).
+PROCESS_EXTRA_KEYS: frozenset[str] = frozenset({"wipe_tower_x", "wipe_tower_y"})
 
 # Keys that identify a preset or are set by the CLI workarounds. Overriding
 # them would make a run misreport which presets it used.
@@ -283,12 +298,25 @@ def _describe_exit(code: int) -> str:
     return f"exit code {code} (0x{unsigned:08X}){hint}"
 
 
+# Log lines that carry no reason for a failure.
+_LOG_NOISE = ("[trace]", "[debug]", "[info]", "sentry_init", "Sentry session", "Initializing")
+
+
 def _log_tail(log_path: Path, lines: int = 15) -> str:
+    """The last lines of the slicer log, skipping trace and Sentry noise so
+    the reason (e.g. "... is too close to others") is visible."""
     try:
         text = log_path.read_text(encoding="utf-8", errors="replace")
     except OSError:
         return ""
-    return "\n".join(text.strip().splitlines()[-lines:])
+    useful = [
+        line
+        for line in text.strip().splitlines()
+        if line.strip()
+        and not any(n in line for n in _LOG_NOISE)
+        and "calc_exclude_triangles" not in line
+    ]
+    return "\n".join((useful or text.strip().splitlines())[-lines:])
 
 
 def slice_model(
@@ -301,10 +329,17 @@ def slice_model(
     work_dir: str | os.PathLike[str] | None = None,
     timeout_s: float = DEFAULT_TIMEOUT_S,
     overrides: SettingsOverrides | None = None,
+    filament_colours: list[str] | None = None,
+    extra_args: list[str] | None = None,
+    process_extra: Mapping[str, list[str]] | None = None,
 ) -> SliceRun:
     """Slice `model` with the given presets and parse the resulting G-code.
 
     `overrides` change settings of the flattened presets for this run only.
+    `filament_colours` (one per head) is written into each filament preset;
+    painted models need it. `extra_args` go before the model path.
+    `process_extra` adds process keys the preset does not define (only
+    `PROCESS_EXTRA_KEYS`); they are checked in the G-code config block.
 
     Raises `SliceError` on a crash, a non-zero exit, a timeout or missing output.
     """
@@ -314,6 +349,17 @@ def slice_model(
 
     overrides = overrides or SettingsOverrides()
     machine_s, process_s, filament_s = prepare_cli_settings(machine, process, filaments, overrides)
+    if filament_colours is not None:
+        if len(filament_colours) != len(filament_s):
+            raise SliceError(
+                f"Got {len(filament_colours)} filament colours for {len(filament_s)} tool heads."
+            )
+        for settings, colour in zip(filament_s, filament_colours, strict=True):
+            settings[FILAMENT_COLOUR_KEY] = [colour]
+    for key, value in (process_extra or {}).items():
+        if key not in PROCESS_EXTRA_KEYS:
+            raise SliceError(f"{key!r} cannot be added to the process preset.")
+        process_s[key] = list(value)
 
     base_dir = to_windows_path(work_dir) if work_dir else default_work_dir()
     expected_out = len(str(base_dir / "20261028-120000-abcdef" / "out"))
@@ -348,6 +394,7 @@ def slice_model(
         ";".join(cli_path(p) for p in filament_paths),
         "--outputdir",
         cli_path(out_dir),
+        *(extra_args or []),
         cli_path(model_path),
     ]
     (run_dir / "command.txt").write_text(subprocess.list2cmdline(command) + "\n", encoding="utf-8")
@@ -386,9 +433,16 @@ def slice_model(
         )
     gcode_path = gcode_files[0]
     result = parse_gcode(gcode_path)
-    if not overrides.is_empty():
+    checked = overrides
+    if process_extra:
+        checked = SettingsOverrides(
+            process={**overrides.process, **{k: v[0] for k, v in process_extra.items()}},
+            machine=overrides.machine,
+            filament=overrides.filament,
+        )
+    if not checked.is_empty():
         try:
-            check_overrides_applied(read_config_block(gcode_path), overrides)
+            check_overrides_applied(read_config_block(gcode_path), checked)
         except SliceError as exc:
             raise SliceError(f"{exc} Run dir: {run_dir}") from exc
 
