@@ -3,6 +3,7 @@
 Each run gets a fresh directory that keeps everything needed to reproduce it:
 
     <run_dir>/machine.json, process.json, filament_<n>.json   flattened presets sent to the CLI
+    <run_dir>/overrides.json                                 setting overrides (if any)
     <run_dir>/command.txt                                    exact command line
     <run_dir>/slicer.log                                     stdout + stderr of the slicer
     <run_dir>/out/plate_1.gcode                              slicer output
@@ -18,6 +19,7 @@ import json
 import os
 import subprocess
 import uuid
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -37,6 +39,106 @@ DEFAULT_TIMEOUT_S = 600.0
 # (found by key bisection, HANDOFF.md section 4, gotcha 5). The effect of
 # dropping it on multi-colour prints is TO VERIFY IN SNAPMAKER ORCA.
 CRASHING_PROCESS_KEYS: tuple[str, ...] = ("wipe_tower_filament",)
+
+# Keys that identify a preset or are set by the CLI workarounds. Overriding
+# them would make a run misreport which presets it used.
+PROTECTED_KEYS: frozenset[str] = frozenset(
+    {"name", "inherits", "from", "instantiation", "setting_id", "type"}
+)
+
+OverrideValue = str | int | float | bool | list[str]
+
+# Flat override keys may carry a section prefix, e.g. `machine.nozzle_diameter`.
+# No preset key contains a dot (checked on 01.10.01.50), so this is unambiguous.
+SECTIONS: tuple[str, ...] = ("process", "machine", "filament")
+
+
+@dataclass(frozen=True)
+class SettingsOverrides:
+    """Key/value overrides applied to the flattened presets before slicing.
+
+    `filament` overrides apply to the filament preset of every tool head.
+    """
+
+    process: dict[str, OverrideValue] = field(default_factory=dict)
+    machine: dict[str, OverrideValue] = field(default_factory=dict)
+    filament: dict[str, OverrideValue] = field(default_factory=dict)
+
+    def is_empty(self) -> bool:
+        return not (self.process or self.machine or self.filament)
+
+    @classmethod
+    def from_flat(cls, values: Mapping[str, OverrideValue] | None) -> SettingsOverrides:
+        """Build overrides from `{key: value}`. A key without a prefix is a process
+        key; `machine.<key>` and `filament.<key>` target the other presets."""
+        sections: dict[str, dict[str, OverrideValue]] = {s: {} for s in SECTIONS}
+        for raw_key, value in (values or {}).items():
+            section, dot, key = raw_key.partition(".")
+            if not dot:
+                section, key = "process", raw_key
+            if section not in sections or not key or "." in key:
+                raise SliceError(
+                    f"Invalid override key {raw_key!r}: use 'key', 'machine.key' or 'filament.key'."
+                )
+            sections[section][key] = value
+        return cls(**sections)
+
+    def to_flat(self) -> dict[str, OverrideValue]:
+        flat: dict[str, OverrideValue] = dict(self.process)
+        flat.update({f"machine.{k}": v for k, v in self.machine.items()})
+        flat.update({f"filament.{k}": v for k, v in self.filament.items()})
+        return flat
+
+
+def _setting_text(key: str, value: Any) -> str:
+    if isinstance(value, bool):
+        # Preset JSON stores booleans as "0" / "1".
+        return "1" if value else "0"
+    if isinstance(value, int | float):
+        return str(value)
+    if isinstance(value, str):
+        return value
+    raise SliceError(f"Override {key!r} must be a string, number, boolean or list of those.")
+
+
+def apply_overrides(
+    settings: dict[str, Any],
+    overrides: Mapping[str, OverrideValue],
+    *,
+    section: str,
+    preset_name: str,
+) -> None:
+    """Apply overrides to a flattened settings dict in place.
+
+    Only keys the flattened preset defines can be overridden, so a typo fails
+    instead of reaching the slicer and being ignored. A single value given for
+    a list setting (one entry per extruder or filament) fills every entry.
+    """
+    for key, value in overrides.items():
+        if key in PROTECTED_KEYS:
+            raise SliceError(f"The {section} setting {key!r} cannot be overridden.")
+        if section == "process" and key in CRASHING_PROCESS_KEYS:
+            raise SliceError(
+                f"The process setting {key!r} cannot be overridden: it is removed before "
+                "slicing because it crashes the Snapmaker Orca CLI."
+            )
+        if key not in settings:
+            raise SliceError(
+                f"Unknown {section} setting {key!r}: the flattened preset {preset_name!r} "
+                "does not define it. Check the spelling against the preset JSON."
+            )
+        current = settings[key]
+        if isinstance(value, list):
+            if not isinstance(current, list):
+                raise SliceError(
+                    f"The {section} setting {key!r} holds a single value in "
+                    f"{preset_name!r}; give a single value, not a list."
+                )
+            settings[key] = [_setting_text(key, v) for v in value]
+        elif isinstance(current, list):
+            settings[key] = [_setting_text(key, value)] * max(len(current), 1)
+        else:
+            settings[key] = _setting_text(key, value)
 
 
 def default_work_dir() -> Path:
@@ -59,9 +161,14 @@ def tool_count(machine: Preset) -> int:
 
 
 def prepare_cli_settings(
-    machine: Preset, process: Preset, filaments: list[Preset]
+    machine: Preset,
+    process: Preset,
+    filaments: list[Preset],
+    overrides: SettingsOverrides | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any], list[dict[str, Any]]]:
-    """Return copies of the flattened presets with the CLI workarounds applied."""
+    """Return copies of the flattened presets with the overrides applied first,
+    then the CLI workarounds. The presets passed in are not modified."""
+    overrides = overrides or SettingsOverrides()
     expected = tool_count(machine)
     if len(filaments) != expected:
         raise SliceError(
@@ -70,11 +177,13 @@ def prepare_cli_settings(
         )
 
     machine_s = copy.deepcopy(machine.settings)
+    apply_overrides(machine_s, overrides.machine, section="machine", preset_name=machine.name)
     # With "from": "User" the CLI reports "process not compatible with printer"
     # (HANDOFF.md section 4, gotcha 4).
     machine_s["from"] = "system"
 
     process_s = copy.deepcopy(process.settings)
+    apply_overrides(process_s, overrides.process, section="process", preset_name=process.name)
     process_s["from"] = "User"
     for key in CRASHING_PROCESS_KEYS:
         process_s.pop(key, None)
@@ -82,6 +191,7 @@ def prepare_cli_settings(
     filament_s = []
     for preset in filaments:
         settings = copy.deepcopy(preset.settings)
+        apply_overrides(settings, overrides.filament, section="filament", preset_name=preset.name)
         settings["from"] = "User"
         filament_s.append(settings)
     return machine_s, process_s, filament_s
@@ -100,6 +210,8 @@ class SliceRun:
     filaments: list[str]
     result: SliceResult
     duration_s: float = field(default=0.0)
+    # Overrides applied, in flat form (`key`, `machine.key`, `filament.key`).
+    overrides: dict[str, OverrideValue] = field(default_factory=dict)
 
 
 def _new_run_dir(work_dir: Path) -> Path:
@@ -138,8 +250,11 @@ def slice_model(
     *,
     work_dir: str | os.PathLike[str] | None = None,
     timeout_s: float = DEFAULT_TIMEOUT_S,
+    overrides: SettingsOverrides | None = None,
 ) -> SliceRun:
     """Slice `model` with the given presets and parse the resulting G-code.
+
+    `overrides` change settings of the flattened presets for this run only.
 
     Raises `SliceError` on a crash, a non-zero exit, a timeout or missing output.
     """
@@ -147,7 +262,8 @@ def slice_model(
     if not model_path.is_file():
         raise SliceError(f"Model file not found: {model_path}")
 
-    machine_s, process_s, filament_s = prepare_cli_settings(machine, process, filaments)
+    overrides = overrides or SettingsOverrides()
+    machine_s, process_s, filament_s = prepare_cli_settings(machine, process, filaments, overrides)
 
     run_dir = _new_run_dir(to_windows_path(work_dir) if work_dir else default_work_dir())
     out_dir = run_dir / "out"
@@ -161,6 +277,8 @@ def slice_model(
         path = run_dir / f"filament_{index}.json"
         _write_json(path, settings)
         filament_paths.append(path)
+    if not overrides.is_empty():
+        _write_json(run_dir / "overrides.json", to_jsonable(overrides))
 
     command = [
         str(install.exe),
@@ -237,6 +355,7 @@ def slice_model(
         filaments=[f.name for f in filaments],
         result=result,
         duration_s=duration_s,
+        overrides=overrides.to_flat(),
     )
     (run_dir / "result.json").write_text(
         json.dumps(to_jsonable(run), indent=2, ensure_ascii=False), encoding="utf-8"

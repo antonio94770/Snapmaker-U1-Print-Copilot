@@ -9,13 +9,14 @@ description = "MCP server and CLI that prepares Snapmaker U1 prints with the Sna
 readme = "README.md"
 requires-python = ">=3.11"
 # License: GPL-3.0-or-later is planned but not yet confirmed by the maintainer.
-dependencies = []
+dependencies = ["mcp>=2.3,<3", "pydantic>=2"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "ruff>=0.6"]
 
 [project.scripts]
 print-copilot = "print_copilot.cli:main"
+print-copilot-mcp = "print_copilot.mcp_server:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/print_copilot"]

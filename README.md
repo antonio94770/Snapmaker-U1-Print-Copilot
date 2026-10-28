@@ -6,9 +6,11 @@ An AI agent (Claude Code, Codex, Claude Desktop, ...) or a person at the
 terminal can list presets, slice a model headlessly and compare the measured
 results.
 
-Status: early development (milestone M1, "Orca core"). The MCP server, model
-analysis, `.3mf` project writing and printer control are planned, see
-`HANDOFF.md`.
+Status: early development (milestone M2, "MCP server"). Model analysis,
+`.3mf` project writing and printer control are planned, see `HANDOFF.md`.
+
+To use it from Claude Code, Codex or Claude Desktop, see
+[docs/mcp-setup.md](docs/mcp-setup.md).
 
 ## Requirements
 
@@ -41,7 +43,30 @@ use it on every head:
 print-copilot slice research/cli-probe/cube.stl --printer "Snapmaker U1 (0.4 nozzle)" --process "0.20mm Standard @Snapmaker U1 (0.4 nozzle)" --filament "Generic PLA"
 ```
 
-Add `--json` to either command for machine-readable output. Every slice runs
+Without `--printer`, `--process` or `--filament`, the selection stored in
+Snapmaker Orca is used (a note says so). Override settings for one run with
+`--set` (process keys, or `machine.KEY` / `filament.KEY`); unknown keys are
+rejected:
+
+```bash
+print-copilot slice research/cli-probe/cube.stl --set sparse_infill_density=30% --set wall_loops=3
+```
+
+Show what is selected in Snapmaker Orca (printer, process, filament and colour
+per tool head, purge volumes):
+
+```bash
+print-copilot setup
+```
+
+Compare variants of one model (each `--variant` is a `;`-separated list of
+overrides, an empty one is the presets as they are):
+
+```bash
+print-copilot compare research/cli-probe/cube.stl --variant "" --variant "sparse_infill_density=30%"
+```
+
+Add `--json` to any command for machine-readable output. Every slice runs
 in a fresh folder under `%LOCALAPPDATA%\print-copilot\runs` (override with
 `--work-dir` or `PRINT_COPILOT_WORK_DIR`) that keeps the flattened presets,
 the exact command line, the slicer log, the G-code and `result.json`.

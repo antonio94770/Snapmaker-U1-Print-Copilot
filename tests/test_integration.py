@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from print_copilot import actions
 from print_copilot.errors import OrcaNotFoundError
 from print_copilot.orca.install import locate
 from print_copilot.orca.presets import PresetLibrary
@@ -41,3 +42,31 @@ def test_slice_cube_u1_standard_pla(real_install, tmp_path) -> None:
     assert result.settings["layer_height"] == "0.2"
     assert run.gcode_path.is_file()
     assert run.log_path.is_file()
+
+
+@pytest.mark.integration
+def test_compare_infill_15_vs_30(real_install, tmp_path) -> None:
+    library = PresetLibrary(real_install.data_dir)
+    selection = actions.select_presets(
+        library,
+        printer="Snapmaker U1 (0.4 nozzle)",
+        process="0.20mm Standard @Snapmaker U1 (0.4 nozzle)",
+        filaments=["Generic PLA"],
+    )
+    comparison = actions.compare_variants(
+        real_install,
+        CUBE,
+        selection,
+        [
+            actions.Variant(overrides={"sparse_infill_density": "15%"}, label="15%"),
+            actions.Variant(overrides={"sparse_infill_density": "30%"}, label="30%"),
+        ],
+        work_dir=tmp_path,
+    )
+    low, high = comparison.variants
+    # Measured on 01.10.01.50: 3.65 g vs 4.71 g.
+    assert high.total_filament_g > low.total_filament_g
+    assert high.filament_delta_g > 0
+    assert low.layer_count == high.layer_count == 100
+    gcode = (high.run_dir / "out" / "plate_1.gcode").read_text(encoding="utf-8")
+    assert "; sparse_infill_density = 30%" in gcode
