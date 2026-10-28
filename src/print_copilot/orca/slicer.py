@@ -33,6 +33,7 @@ from print_copilot.orca.presets import Preset
 from print_copilot.serialize import to_jsonable
 
 ENV_WORK_DIR = "PRINT_COPILOT_WORK_DIR"
+ENV_EXPORT_DIR = "PRINT_COPILOT_EXPORT_DIR"
 DEFAULT_TIMEOUT_S = 600.0
 
 # Longest `--outputdir` that still works: at 230 characters the CLI fails with
@@ -213,6 +214,15 @@ def default_work_dir() -> Path:
         return to_windows_path(env)
     base = os.environ.get("LOCALAPPDATA") or str(Path.home())
     return Path(base) / "print-copilot" / "runs"
+
+
+def default_export_dir() -> Path:
+    """Where exported projects go when no output path is given."""
+    env = os.environ.get(ENV_EXPORT_DIR)
+    if env:
+        return to_windows_path(env)
+    base = os.environ.get("LOCALAPPDATA") or str(Path.home())
+    return Path(base) / "print-copilot" / "exports"
 
 
 def tool_count(machine: Preset) -> int:

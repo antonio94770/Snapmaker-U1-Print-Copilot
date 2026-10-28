@@ -2,11 +2,15 @@
 
 Object and field names below were read from a U1 on firmware 2.0.0. The order of
 `filament_detect.info` follows the heads (entry 0 = T0 = `extruder`; verified
-2026-10-28: the black spool read on entry 1 printed from T1).
+2026-10-28: the black spool read on entry 1 printed from T1). During a print
+of a Snapmaker Orca G-code, `print_stats.info` holds `current_layer` and
+`total_layer`, and `gcode_move.gcode_position[2]` is the G-code Z (verified
+2026-10-28 mid-print: layer 172 of 625 at Z 27.56 mm).
 """
 
 from __future__ import annotations
 
+import contextlib
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -60,6 +64,14 @@ class PrinterStatus:
     bed_temperature_c: float | None
     bed_target_c: float | None
     heads: list[HeadStatus] = field(default_factory=list)
+    # While printing: the layer and Z reported by the printer, the slicer's
+    # estimate for the whole file, and that estimate minus the time printed
+    # so far (an estimate, not a measurement).
+    current_layer: int | None = None
+    total_layers: int | None = None
+    z_mm: float | None = None
+    slicer_estimated_time_s: float | None = None
+    remaining_estimate_s: float | None = None
 
     @property
     def ready_to_start(self) -> bool:
@@ -87,7 +99,8 @@ def read_status(client: MoonrakerClient) -> PrinterStatus:
     info = client.printer_info()
     product = client.system_info().get("product_info", {})
     objects: dict[str, list[str] | None] = {
-        "print_stats": ["state", "filename", "print_duration"],
+        "print_stats": ["state", "filename", "print_duration", "info"],
+        "gcode_move": ["gcode_position"],
         "virtual_sdcard": ["progress"],
         "toolhead": ["homed_axes", "extruder"],
         "heater_bed": ["temperature", "target"],
@@ -118,19 +131,38 @@ def read_status(client: MoonrakerClient) -> PrinterStatus:
         )
     bed = status.get("heater_bed", {})
     toolhead = status.get("toolhead", {})
+    print_state = str(stats.get("state", "unknown"))
+    filename = stats.get("filename") or None
+    duration_s = float(stats.get("print_duration", 0.0))
+    layer = total = z = estimate = remaining = None
+    if print_state in ("printing", "paused"):
+        layers = stats.get("info") or {}
+        layer, total = layers.get("current_layer"), layers.get("total_layer")
+        position = status.get("gcode_move", {}).get("gcode_position") or []
+        z = round(float(position[2]), 2) if len(position) > 2 else None
+        if filename:
+            with contextlib.suppress(PrinterError):
+                estimate = client.file_metadata(filename).get("estimated_time")
+        if isinstance(estimate, (int, float)):
+            remaining = max(float(estimate) - duration_s, 0.0)
     return PrinterStatus(
         base_url=client.base_url,
         machine_type=product.get("machine_type"),
         firmware_version=product.get("firmware_version"),
         klippy_state=str(info.get("state", "unknown")),
         state_message=str(info.get("state_message", "")),
-        print_state=str(stats.get("state", "unknown")),
-        print_filename=stats.get("filename") or None,
+        print_state=print_state,
+        print_filename=filename,
         progress=float(status.get("virtual_sdcard", {}).get("progress", 0.0)),
-        print_duration_s=float(stats.get("print_duration", 0.0)),
+        print_duration_s=duration_s,
         homed_axes=str(toolhead.get("homed_axes", "")),
         active_head=toolhead.get("extruder"),
         bed_temperature_c=bed.get("temperature"),
         bed_target_c=bed.get("target"),
         heads=heads,
+        current_layer=layer,
+        total_layers=total,
+        z_mm=z,
+        slicer_estimated_time_s=float(estimate) if isinstance(estimate, (int, float)) else None,
+        remaining_estimate_s=remaining,
     )

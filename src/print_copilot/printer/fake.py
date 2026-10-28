@@ -67,6 +67,10 @@ class FakeState:
         ]
     )
     files: dict[str, FakeFile] = field(default_factory=dict)
+    print_duration_s: float = 0.0
+    current_layer: int = 0
+    total_layers: int = 0
+    z_mm: float = 0.0
 
 
 def gcode_metadata(name: str, item: FakeFile) -> dict[str, Any]:
@@ -154,8 +158,10 @@ class FakeMoonraker:
             "print_stats": {
                 "filename": s.print_filename,
                 "state": s.print_state,
-                "print_duration": 0.0,
+                "print_duration": s.print_duration_s,
+                "info": {"total_layer": s.total_layers, "current_layer": s.current_layer},
             },
+            "gcode_move": {"gcode_position": [0.0, 0.0, s.z_mm, 0.0]},
             "virtual_sdcard": {"progress": 0.0, "is_active": printing},
             "toolhead": {"homed_axes": "xyz" if printing else "", "extruder": "extruder"},
             "heater_bed": {"temperature": 24.0, "target": s.targets_c["heater_bed"]},

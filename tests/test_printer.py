@@ -154,6 +154,19 @@ def test_status_reads_heads_and_rfid_spools(client) -> None:
     assert status.heads[0].rfid_filament.type == "PLA"
     assert status.heads[0].rfid_filament.colour == "#E2DEDB"
     assert status.heads[2].rfid_filament is None
+    assert status.current_layer is None and status.remaining_estimate_s is None
+
+
+def test_status_while_printing_shows_layer_z_and_time_left(fake, client, stored) -> None:
+    estimate = client.file_metadata(stored)["estimated_time"]
+    s = fake.state
+    s.print_state, s.print_filename = "printing", stored
+    s.current_layer, s.total_layers, s.z_mm, s.print_duration_s = 172, 625, 27.56, 60.0
+    status = actions.printer_status(client)
+    assert (status.current_layer, status.total_layers, status.z_mm) == (172, 625, 27.56)
+    assert status.klippy_state == "ready"
+    assert status.slicer_estimated_time_s == estimate
+    assert status.remaining_estimate_s == max(estimate - 60.0, 0.0)
 
 
 def test_upload_never_starts_and_refuses_overwrite(fake, client, cube_gcode) -> None:

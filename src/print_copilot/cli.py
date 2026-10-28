@@ -553,7 +553,7 @@ def cmd_strategies(args: argparse.Namespace) -> int:
     _print_assignment(comparison.assignment)
     print(
         f"{'strategy':<26} {'time':>10} {'d time':>8} {'grams':>8} {'d g':>8} "
-        f"{'changes':>8} {'tower g':>8}"
+        f"{'changes':>8} {'tower g':>8} {'supp. g':>8}"
     )
     for v in comparison.variants:
         if v.slice is None:
@@ -561,10 +561,11 @@ def cmd_strategies(args: argparse.Namespace) -> int:
             print(f"{v.label[:26]:<26} failed: {reason[-1][:200] if reason else ''}")
             continue
         r = v.slice
+        support = f"{r.support.support_g:>8.2f}" if r.support else f"{'?':>8}"
         print(
             f"{v.label[:26]:<26} {format_duration(r.estimated_time_s):>10} {v.time_delta_s:>+8d} "
             f"{r.total_filament_g:>8.2f} {v.filament_delta_g:>+8.2f} {r.tool_changes:>8d} "
-            f"{r.prime_tower_g:>8.2f}"
+            f"{r.prime_tower_g:>8.2f} {support}"
         )
     print(f"fastest: {comparison.fastest}; least filament: {comparison.least_filament}")
     print("All numbers are the slicer's own figures from each G-code.")
@@ -616,6 +617,13 @@ def cmd_export_project(args: argparse.Namespace) -> int:
         print(f"To reopen what this G-code prints: {exported.path}")
     if opened:
         print("Opened in Snapmaker Orca.")
+    return 0
+
+
+def cmd_open(args: argparse.Namespace) -> int:
+    install = locate(args.orca_exe, args.orca_data)
+    multicolor.open_in_app(install, args.project)
+    print(f"Opened in Snapmaker Orca: {args.project}")
     return 0
 
 
@@ -719,6 +727,13 @@ def cmd_printer_status(args: argparse.Namespace) -> int:
     )
     if status.print_state in ("printing", "paused"):
         print(f"  progress {status.progress:.0%}, {format_duration(int(status.print_duration_s))}")
+        if status.current_layer is not None:
+            print(f"  layer {status.current_layer} of {status.total_layers}, Z {status.z_mm} mm")
+        if status.remaining_estimate_s is not None:
+            print(
+                f"  about {format_duration(int(status.remaining_estimate_s))} left "
+                "(slicer estimate minus time printed)"
+            )
     print(f"Bed: {status.bed_temperature_c} / {status.bed_target_c} C")
     for head in status.heads:
         spool = head.rfid_filament
@@ -1062,7 +1077,11 @@ def build_parser() -> argparse.ArgumentParser:
         parents=[common, slicing, running, project_opts],
         help="write one plate as a new 3MF project for Snapmaker Orca with the U1 presets",
     )
-    ep.add_argument("--out", required=True, help="new .3mf file to write (never overwritten)")
+    ep.add_argument(
+        "--out",
+        help="new .3mf file to write, never overwritten (default: a new folder under "
+        "PRINT_COPILOT_EXPORT_DIR, %%LOCALAPPDATA%%\\print-copilot\\exports)",
+    )
     ep.add_argument("--set", action="append", metavar="KEY=VALUE", help="as for slice")
     ep.add_argument("--open", action="store_true", help="open the written project in the app")
     ep.add_argument(
@@ -1071,6 +1090,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="only write the project (default: also slice it into a .gcode next to it)",
     )
     ep.set_defaults(func=cmd_export_project)
+
+    op = sub.add_parser("open", parents=[common], help="open a 3MF project in Snapmaker Orca")
+    op.add_argument("project", help="the .3mf to open")
+    op.set_defaults(func=cmd_open)
 
     q = sub.add_parser(
         "quality",

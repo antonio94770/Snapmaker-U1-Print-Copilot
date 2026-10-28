@@ -330,6 +330,19 @@ def test_export_project(fake_install, project_file, selection, tmp_path) -> None
         multicolor.export_project(fake_install, project_file, selection, missing, plate=2)
 
 
+def test_export_without_out_path_uses_the_export_dir(
+    fake_install, monkeypatch, project_file, selection, tmp_path
+) -> None:
+    monkeypatch.setenv("PRINT_COPILOT_EXPORT_DIR", str(tmp_path / "exports"))
+    exported = multicolor.export_project(
+        fake_install, project_file, selection, plate=2, work_dir=tmp_path / "w"
+    )
+    assert exported.path.name == "synthetic.3mf"
+    assert exported.path.parent.parent == tmp_path / "exports"
+    assert exported.path.parent.name.startswith("synthetic-")
+    assert exported.path.is_file()
+
+
 def test_open_in_app(fake_install, monkeypatch, project_file) -> None:
     started = []
     monkeypatch.setattr(subprocess, "Popen", lambda command, **kw: started.append(command))
@@ -338,6 +351,10 @@ def test_open_in_app(fake_install, monkeypatch, project_file) -> None:
     assert command[0] == str(fake_install.exe)
     with pytest.raises(SliceError, match="not found"):
         multicolor.open_in_app(fake_install, project_file.with_name("missing.3mf"))
+    args = ["--orca-exe", str(fake_install.exe), "--orca-data", str(fake_install.data_dir)]
+    assert cli.main(["open", str(project_file), *args]) == 0
+    assert started[-1] == [str(fake_install.exe), started[-1][1]]
+    assert started[-1][1].endswith("synthetic.3mf")
 
 
 def test_cli_project_commands(

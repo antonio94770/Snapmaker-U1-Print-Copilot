@@ -35,6 +35,7 @@ def test_server_lists_the_tools() -> None:
         "inspect_project",
         "list_presets",
         "list_printer_files",
+        "open_in_orca",
         "optimize_orientation",
         "plan_print_start",
         "preview_gcode",

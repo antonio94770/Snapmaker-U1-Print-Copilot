@@ -55,6 +55,9 @@ preview_gcode, and read warning/unverified findings. record_quality_review is
 an explicit visual-review attestation, not permission to print or a physical
 quality guarantee. Finer layers are a heuristic candidate, not a calibrated
 winner. Never claim all inventoried parameters were automatically validated.
+If you skip review_print (a quick one-colour print the user wants now), at
+least run preview_gcode on the layers where supports and overhangs start,
+and tell the user the full review was not run.
 Start with get_current_setup to see the printer, process and per-head filaments
 selected in the app, and list_presets to find other preset names. slice and
 compare_variants run the real slicer headlessly: their times and grams are the
@@ -77,12 +80,18 @@ tool head proposed for each from the colours loaded on the U1. The loaded
 colours come from the printer's RFID readers when it answers, otherwise from
 the app's selection (the notes say which). A one-colour plate or STL is never
 put on a head automatically: show the user the loaded spools and ask which one
-to print with, then pass head. slice_project slices one plate and measures
-tool changes, prime tower and purge; compare_strategies tries the prime tower
-off and one object at a time. To prepare a print, use export_project: it
-writes the project for the app, slices that same project and puts the
-.gcode next to the .3mf. Upload that .gcode and tell the user the .3mf path:
-it is the file to reopen in Snapmaker Orca to see or change what was printed.
+to print with, then pass head. Before slicing, tell the user the plate size
+and, from inspect_project (pass the process you will use), the settings
+the project was saved with that differ from that process and the settings
+its objects set themselves; ask which values to keep when they matter
+(layer height, supports). slice_project slices one plate and measures
+tool changes, prime tower, purge and support grams; compare_strategies tries
+the prime tower off and one object at a time, or any variants you pass.
+To prepare a print, use export_project: it writes the project for the app,
+slices that same project, puts the .gcode next to the .3mf and opens the
+project in Snapmaker Orca so the user sees it before anything is uploaded.
+Upload that .gcode and tell the user the .3mf path: it is the file to reopen
+(open_in_orca) to see or change what was printed.
 On the U1 the purge matrix has no effect: what costs time and material is the
 number of tool changes and the prime tower. If the plate's colours are not the
 loaded ones, tell the user which filament to load on which head.
@@ -240,6 +249,9 @@ def compare_variants(
     """Slice one model once per variant (set of overrides) and return a table of
     measured time, total grams, layers and grams per tool head, with deltas
     against the first variant. Put the baseline (empty overrides) first.
+    It prints with T0 and ignores a project's plates: for a 3MF project or
+    another head, use compare_strategies with variants, which also measures
+    support grams.
 
     model, printer, process, filaments: as for slice.
     variants: e.g. [{"label": "15%", "overrides": {}},
@@ -541,7 +553,9 @@ def compare_strategies(
     two or more objects). A strategy the slicer refuses is listed with its
     error. Quality effects (ooze without a tower) are not measured: say so.
 
-    variants: custom strategies instead, same format as compare_variants.
+    variants: custom strategies instead, same format as compare_variants; any
+        settings, e.g. support_threshold_angle 25 vs 30 on one head. Each slice
+        reports measured support grams under support.
     Other arguments: as for slice_project.
     """
     install, selection = _project_selection(printer, process, filaments, use_printer)
@@ -573,12 +587,12 @@ def compare_strategies(
 @_tool_errors
 def export_project(
     model: str,
-    out_path: str,
+    out_path: str | None = None,
     plate: int | None = None,
     mapping: dict[str, int] | None = None,
     reduce_colours: bool = False,
     overrides: dict[str, OverrideValue] | None = None,
-    open_in_app: bool = False,
+    open_in_app: bool = True,
     printer: str | None = None,
     process: str | None = None,
     filaments: list[str] | None = None,
@@ -591,10 +605,14 @@ def export_project(
     selected presets (with overrides) as project settings. With slice, that
     same 3MF is sliced and the G-code is written next to it (same name,
     .gcode): upload that file, and tell the user the .3mf is the project to
-    reopen for what was printed. With open_in_app, start Snapmaker Orca with
-    it so the user can check and adjust it. Never overwrites a file.
+    reopen for what was printed. open_in_app (default on) starts Snapmaker
+    Orca with it so the user sees and can adjust it before anything is
+    uploaded; turn it off only for intermediate exports. Never overwrites a
+    file.
 
-    out_path: absolute path of the new .3mf (must not exist, nor its .gcode).
+    out_path: absolute path of the new .3mf (must not exist, nor its .gcode);
+        default: a new folder under PRINT_COPILOT_EXPORT_DIR
+        (%LOCALAPPDATA%\\print-copilot\\exports).
     Other arguments: as for slice_project.
     """
     install, selection = _project_selection(printer, process, filaments, use_printer)
@@ -614,6 +632,23 @@ def export_project(
     data["notes"] = selection.notes + data["notes"]
     data["opened_with"] = multicolor.open_in_app(install, exported.path) if open_in_app else None
     return data
+
+
+@server.tool(
+    annotations=ToolAnnotations(
+        read_only_hint=False, destructive_hint=False, idempotent_hint=False, open_world_hint=False
+    )
+)
+@_tool_errors
+def open_in_orca(project: str) -> dict[str, Any]:
+    """Open an existing 3MF project in Snapmaker Orca so the user sees it
+    (for example the .3mf next to a G-code that was printed). Starts the app
+    and returns at once; changes nothing on disk.
+
+    project: absolute path of the .3mf.
+    """
+    install = locate()
+    return {"project": project, "opened_with": multicolor.open_in_app(install, project)}
 
 
 @server.tool(annotations=SLICING)
@@ -741,7 +776,9 @@ def discover_printers() -> list[dict[str, Any]]:
 def printer_status() -> dict[str, Any]:
     """Read the U1's state: Klipper and print state, bed and head temperatures,
     which head is active, and the spool each head's RFID reader identified
-    (heads without a tag show none; that does not mean they are empty)."""
+    (heads without a tag show none; that does not mean they are empty).
+    While printing: current layer, Z in mm, and remaining_estimate_s (the
+    slicer's estimate minus the time printed; an estimate, say so)."""
     status = printer.printer_status(MoonrakerClient())
     data = to_jsonable(status)
     data["ready_to_start"] = status.ready_to_start

@@ -54,6 +54,7 @@ from print_copilot.orca.slicer import (
     OverrideValue,
     SettingsOverrides,
     SliceRun,
+    default_export_dir,
     default_work_dir,
     prepare_cli_settings,
     slice_model,
@@ -972,7 +973,7 @@ def export_project(
     install: OrcaInstall,
     model: str | os.PathLike[str],
     selection: Selection,
-    out_path: str | os.PathLike[str],
+    out_path: str | os.PathLike[str] | None = None,
     *,
     plate: int | None = None,
     mapping: dict[int, int] | None = None,
@@ -993,10 +994,15 @@ def export_project(
     and the file to print come from the same project.
 
     `out_path` (and with `slice_gcode` the `.gcode` next to it) must not
-    exist; the source file is never changed.
+    exist; the source file is never changed. Without `out_path` the project
+    goes into a new folder under `default_export_dir()`.
     """
-    out = to_windows_path(out_path)
     source = to_windows_path(model)
+    if out_path is None:
+        folder = default_export_dir() / f"{source.stem}-{datetime.now():%Y%m%d-%H%M%S}"
+        folder.mkdir(parents=True, exist_ok=True)
+        out_path = folder / f"{source.stem}.3mf"
+    out = to_windows_path(out_path)
     gcode_out = out.with_suffix(".gcode") if slice_gcode else None
     if not out.parent.is_dir():
         raise SliceError(f"Output folder {out.parent} does not exist; create it or choose another.")

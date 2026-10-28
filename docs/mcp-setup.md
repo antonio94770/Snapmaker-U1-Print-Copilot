@@ -24,6 +24,7 @@ Optional environment variables (the same ones the CLI reads):
 | `PRINT_COPILOT_ORCA_EXE` | `C:\Program Files\Snapmaker_Orca\snapmaker-orca.exe` | Snapmaker Orca executable |
 | `PRINT_COPILOT_ORCA_DATA` | `%APPDATA%\Snapmaker_Orca` | Snapmaker Orca presets and `Snapmaker_Orca.conf` |
 | `PRINT_COPILOT_WORK_DIR` | `%LOCALAPPDATA%\print-copilot\runs` | where each slice gets its run folder |
+| `PRINT_COPILOT_EXPORT_DIR` | `%LOCALAPPDATA%\print-copilot\exports` | where `export_project` writes when no output path is given |
 | `PRINT_COPILOT_PRINTER_URL` | found through mDNS | fixed printer address, e.g. `http://192.168.1.50`; only needed when discovery does not work on your network |
 | `PRINT_COPILOT_PRINTER_NAME` | none | device name of the U1 to use when several answer |
 
@@ -38,10 +39,11 @@ Optional environment variables (the same ones the CLI reads):
 | `analyze_model` | ranks candidate orientations of an STL/3MF with a geometric overhang heuristic (no slicing) | `print-copilot analyze` |
 | `optimize_orientation` | slices the best candidate orientations with each support mode (none / normal / tree) and recommends one for the goal (speed, quality, min_support) | `print-copilot orient` |
 | `render_model` | returns a PNG of labelled views (as loaded or in a print orientation) with bed contact, supports and protected surfaces coloured, so the agent can look at the model | `print-copilot render` |
-| `inspect_project` | reads a 3MF project (Snapmaker Orca, Bambu Studio, PrusaSlicer): plates, objects, the filaments each plate uses, and the U1 tool head proposed for each from the loaded colours | `print-copilot project` |
-| `slice_project` | slices one plate of a project on the U1 with that head assignment and returns time, grams per head, tool changes, prime tower and purge grams | `print-copilot slice-project` |
-| `compare_strategies` | slices one plate with the prime tower on/off and one object at a time, and compares the measured results | `print-copilot strategies` |
-| `export_project` | writes the plate (or an STL) as a new 3MF for Snapmaker Orca with the U1 presets and heads, slices that 3MF into a `.gcode` next to it, and can open it in the app | `print-copilot export-project` |
+| `inspect_project` | reads a 3MF project (Snapmaker Orca, Bambu Studio, PrusaSlicer): plates, objects and their size in mm, whether each plate fits the bed, the filaments each plate uses, the U1 tool head proposed for each from the loaded colours, settings the objects set themselves, and saved settings that differ from the process preset | `print-copilot project` |
+| `slice_project` | slices one plate of a project on the U1 with that head assignment and returns time, grams per head, tool changes, prime tower, purge and support grams | `print-copilot slice-project` |
+| `compare_strategies` | slices one plate with the prime tower on/off and one object at a time (or any variants given), and compares the measured results | `print-copilot strategies` |
+| `export_project` | writes the plate (or an STL) as a new 3MF for Snapmaker Orca with the U1 presets and heads, slices that 3MF into a `.gcode` next to it, and opens it in the app (default) | `print-copilot export-project` (`--open`) |
+| `open_in_orca` | opens an existing 3MF in Snapmaker Orca | `print-copilot open` |
 
 Printer tools (Moonraker on the U1; the printer is found on the network through
 mDNS, once per server process, and found again if it stops answering):
@@ -49,7 +51,7 @@ mDNS, once per server process, and found again if it stops answering):
 | Tool | What it does | CLI equivalent |
 | --- | --- | --- |
 | `discover_printers` | Snapmaker printers answering on the LAN, with their current address | `print-copilot printer discover` |
-| `printer_status` | state, temperatures, active head, and the spool each head's RFID reader identified | `print-copilot printer status` |
+| `printer_status` | state, temperatures, active head, the spool each head's RFID reader identified, and while printing the layer, Z and an estimate of the time left | `print-copilot printer status` |
 | `list_printer_files` | G-code files stored on the printer | `print-copilot printer files` |
 | `upload_to_printer` | copies a G-code file sliced for the U1; refuses other printers and overwrites; never starts it | `print-copilot printer upload` |
 | `plan_print_start` | sends nothing: returns the exact start request, the file's slicer figures, per-head checks and a one-time token | `print-copilot printer start --dry-run` |
@@ -81,7 +83,7 @@ a box in mm read off the grid), runs `optimize_orientation` with
 Multi-colour projects: the agent starts with `inspect_project`, tells the user
 which colour to load on which head when the loaded ones differ (the notes
 give the CIE76 colour distance, a heuristic), slices or compares strategies,
-and finishes with `export_project` (`open_in_app=true`) so the user sees the
+and finishes with `export_project` (it opens the project by default) so the user sees the
 result in Snapmaker Orca. A one-colour plate or an STL is never put on a head
 automatically: the tool error lists the loaded spools, the agent asks the
 user which one to use and passes `head`. `export_project` slices the project
