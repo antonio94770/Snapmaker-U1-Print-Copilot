@@ -33,12 +33,25 @@ Optional environment variables (the same ones the CLI reads):
 | `get_current_setup` | printer, process, filament and colour per tool head, purge matrix, as selected in Snapmaker Orca | `print-copilot setup` |
 | `slice` | slices a model headlessly with optional setting overrides and returns the slicer's time, grams per head and layers | `print-copilot slice` |
 | `compare_variants` | slices one model once per override set and returns a comparison table | `print-copilot compare` |
+| `analyze_model` | ranks candidate orientations of an STL/3MF with a geometric overhang heuristic (no slicing) | `print-copilot analyze` |
+| `optimize_orientation` | slices the best candidate orientations with each support mode (none / normal / tree) and recommends one for the goal (speed, quality, min_support) | `print-copilot orient` |
+| `render_model` | returns a PNG of labelled views (as loaded or in a print orientation) with bed contact, supports and protected surfaces coloured, so the agent can look at the model | `print-copilot render` |
 
 None of these tools talk to the printer. Overrides use preset JSON keys
 (`sparse_infill_density`, `wall_loops`, ...). A key without a prefix is a
 process setting; `machine.<key>` and `filament.<key>` target the machine and
 filament presets (filament overrides apply to every head). Keys the preset does
 not define are rejected.
+
+`analyze_model` numbers (overhang area, support volume) are a labelled
+heuristic. `optimize_orientation` reports the slicer's time and grams and the
+support material measured from the G-code's `;TYPE:Support` toolpaths; it
+writes each rotated model as an STL you can open in Snapmaker Orca.
+
+For models where one surface matters (a miniature's face, text), the agent
+renders the model, chooses `protect` regions from the image (direction and/or
+a box in mm read off the grid), runs `optimize_orientation` with
+`goal="quality"` and renders the recommended `down_vector` to check it.
 
 Slicing a small model takes about a second, but large models can take minutes.
 Raise the client's tool timeout if slices get cut off (see below).
@@ -105,5 +118,9 @@ npx @modelcontextprotocol/inspector "C:\Users\you\Snapmaker_Print_Copilot\.venv\
 - "What printer and filaments do I have selected in Snapmaker Orca?"
 - "Slice `C:\models\bracket.stl` with my current setup and tell me time and
   grams per tool head."
+- "Find the best orientation for `C:\models\bracket.stl`, compare tree and
+  normal supports, and tell me how much support material each needs."
+- "This is a miniature: look at it, find the face, and pick the
+  orientation that keeps the face free of support marks."
 - "Compare 15%, 25% and 40% infill and 2 vs 4 walls for the bracket and
   recommend the cheapest variant that keeps 4 walls."

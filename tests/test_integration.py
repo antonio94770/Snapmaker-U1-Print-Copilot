@@ -70,3 +70,57 @@ def test_compare_infill_15_vs_30(real_install, tmp_path) -> None:
     assert low.layer_count == high.layer_count == 100
     gcode = (high.run_dir / "out" / "plate_1.gcode").read_text(encoding="utf-8")
     assert "; sparse_infill_density = 30%" in gcode
+
+
+@pytest.mark.integration
+def test_orient_tee_prefers_no_support(real_install, tmp_path) -> None:
+    library = PresetLibrary(real_install.data_dir)
+    selection = actions.select_presets(
+        library,
+        printer="Snapmaker U1 (0.4 nozzle)",
+        process="0.20mm Standard @Snapmaker U1 (0.4 nozzle)",
+        filaments=["Generic PLA"],
+    )
+    tee = Path(__file__).parent / "fixtures" / "tee.stl"
+    report = actions.optimize_orientation(
+        real_install, tee, selection, top=2, support_modes=["tree"], work_dir=tmp_path
+    )
+    by_label = {s.candidate: s for s in report.slices}
+    # Measured on 01.10.01.50: as loaded the cap needs tree supports (0.97 g of
+    # 3.83 g, 20m 41s); lying on its side needs none (2.83 g, 11m 41s).
+    assert by_label["as loaded"].support_filament_g > 0.5
+    assert report.recommended.support_filament_mm == 0
+    assert report.recommended.estimated_time_s < by_label["as loaded"].estimated_time_s
+    assert report.notes == []
+
+
+@pytest.mark.integration
+def test_orient_bust_quality_keeps_face_clean(real_install, tmp_path) -> None:
+    from print_copilot.model.mesh import write_stl
+    from print_copilot.model.orientation import Region
+    from synthetic_bust import FACE_BOX_MAX, FACE_BOX_MIN, bust_mesh
+
+    model = write_stl(bust_mesh(), tmp_path / "bust.stl")
+    library = PresetLibrary(real_install.data_dir)
+    selection = actions.select_presets(
+        library,
+        printer="Snapmaker U1 (0.4 nozzle)",
+        process="0.20mm Standard @Snapmaker U1 (0.4 nozzle)",
+        filaments=["Generic PLA"],
+    )
+    face = Region("face", [0, -1, 0], 70, FACE_BOX_MIN, FACE_BOX_MAX)
+    report = actions.optimize_orientation(
+        real_install,
+        model,
+        selection,
+        top=2,
+        support_modes=["tree"],
+        goal="quality",
+        regions=[face],
+        work_dir=tmp_path / "runs",
+    )
+    # Measured on 01.10.01.50: upright needs 0.13 g of tree support and no
+    # support interface; upside down needs 1.62 g.
+    assert report.recommended.candidate == "as loaded"
+    assert report.recommended.support_interface_mm == 0
+    assert report.recommended.support_filament_g < 0.5

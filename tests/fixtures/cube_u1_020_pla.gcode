@@ -14,9 +14,11 @@
 ; first layer extrusion width = 0.50mm
 
 ; EXECUTABLE_BLOCK_START
+M83 ; use relative distances for extrusion
 G28
 T0
-G1 X10 Y10 E1.5
+;TYPE:Outer wall
+G1 X10 Y10 E1225.34
 ; EXECUTABLE_BLOCK_END
 
 ; filament used [mm] = 1225.34, 0.00, 0.00, 0.00

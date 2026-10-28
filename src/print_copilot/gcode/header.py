@@ -184,6 +184,31 @@ def parse_gcode_text(lines: list[str] | str) -> SliceResult:
     )
 
 
+def read_config_block(path: str | os.PathLike[str]) -> dict[str, str]:
+    """Every `key = value` line between CONFIG_BLOCK_START and CONFIG_BLOCK_END,
+    values as written (quotes kept)."""
+    gcode_path = Path(path)
+    config: dict[str, str] = {}
+    inside = False
+    try:
+        with gcode_path.open(encoding="utf-8", errors="replace") as handle:
+            for raw in handle:
+                if not raw.startswith(";"):
+                    continue
+                line = raw[1:].strip()
+                if line == "CONFIG_BLOCK_START":
+                    inside = True
+                elif line == "CONFIG_BLOCK_END":
+                    break
+                elif inside:
+                    key, sep, value = line.partition(" = ")
+                    if sep:
+                        config[key.strip()] = value
+    except OSError as exc:
+        raise GcodeParseError(f"Cannot read G-code {gcode_path}: {exc}") from exc
+    return config
+
+
 def parse_gcode(path: str | os.PathLike[str]) -> SliceResult:
     """Parse a G-code file written by Snapmaker Orca."""
     gcode_path = Path(path)

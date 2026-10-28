@@ -26,13 +26,19 @@ from pathlib import Path
 from typing import Any
 
 from print_copilot.errors import SliceError
-from print_copilot.gcode.header import SliceResult, parse_gcode
+from print_copilot.gcode.header import SliceResult, parse_gcode, read_config_block
 from print_copilot.orca.install import OrcaInstall, cli_path, to_windows_path
 from print_copilot.orca.presets import Preset
 from print_copilot.serialize import to_jsonable
 
 ENV_WORK_DIR = "PRINT_COPILOT_WORK_DIR"
 DEFAULT_TIMEOUT_S = 600.0
+
+# Longest `--outputdir` that still works: at 230 characters the CLI fails with
+# "GCode processor post process export failed. Cannot open file for writing."
+# (bisected on 01.10.01.50 with the default plate_1.gcode name; the Windows
+# 260-character path limit minus the files the CLI writes there).
+MAX_OUTPUT_DIR_CHARS = 229
 
 # Process keys removed before slicing because they crash the CLI.
 # `wipe_tower_filament = "0"` in the U1 process presets segfaults the CLI
@@ -139,6 +145,50 @@ def apply_overrides(
             settings[key] = [_setting_text(key, value)] * max(len(current), 1)
         else:
             settings[key] = _setting_text(key, value)
+
+
+def _same_setting(expected: str, written: str) -> bool:
+    expected, written = expected.strip().strip('"'), written.strip().strip('"')
+    if expected == written:
+        return True
+    try:
+        return float(expected.rstrip("%")) == float(written.rstrip("%")) and (
+            expected.endswith("%") == written.endswith("%")
+        )
+    except ValueError:
+        return False
+
+
+def check_overrides_applied(config: Mapping[str, str], overrides: SettingsOverrides) -> None:
+    """Fail if the G-code config block does not show an override's value.
+
+    The CLI silently replaces values it does not accept: `support_type = bogus`
+    is sliced as `normal(auto)` (verified on 01.10.01.50). Keys missing from the
+    config block and multi-line values are not checked.
+    """
+    for key, value in {**overrides.machine, **overrides.filament, **overrides.process}.items():
+        if key not in config:
+            continue
+        expected = [_setting_text(key, v) for v in value] if isinstance(value, list) else None
+        if expected is None:
+            expected = [_setting_text(key, value)]
+        if any("\n" in e or ";" in e for e in expected):
+            continue
+        written = config[key].split(",")
+        if _same_setting(",".join(expected), config[key]):
+            ok = True
+        elif len(set(expected)) == 1:
+            ok = all(_same_setting(expected[0], w) for w in written)
+        else:
+            ok = len(expected) == len(written) and all(
+                _same_setting(e, w) for e, w in zip(expected, written, strict=True)
+            )
+        if not ok:
+            raise SliceError(
+                f"Snapmaker Orca did not apply the override {key} = {value!r}: the G-code "
+                f"says {key} = {config[key]}. The value is probably not one the slicer "
+                "accepts (it falls back silently); check the allowed values in the app."
+            )
 
 
 def default_work_dir() -> Path:
@@ -265,7 +315,15 @@ def slice_model(
     overrides = overrides or SettingsOverrides()
     machine_s, process_s, filament_s = prepare_cli_settings(machine, process, filaments, overrides)
 
-    run_dir = _new_run_dir(to_windows_path(work_dir) if work_dir else default_work_dir())
+    base_dir = to_windows_path(work_dir) if work_dir else default_work_dir()
+    expected_out = len(str(base_dir / "20261028-120000-abcdef" / "out"))
+    if expected_out > MAX_OUTPUT_DIR_CHARS:
+        raise SliceError(
+            f"The work dir {base_dir} is too long: Snapmaker Orca cannot write G-code into an "
+            f"output folder longer than {MAX_OUTPUT_DIR_CHARS} characters (this one would be "
+            f"{expected_out}). Use a shorter --work-dir or {ENV_WORK_DIR}."
+        )
+    run_dir = _new_run_dir(base_dir)
     out_dir = run_dir / "out"
     out_dir.mkdir()
     machine_path = run_dir / "machine.json"
@@ -328,6 +386,11 @@ def slice_model(
         )
     gcode_path = gcode_files[0]
     result = parse_gcode(gcode_path)
+    if not overrides.is_empty():
+        try:
+            check_overrides_applied(read_config_block(gcode_path), overrides)
+        except SliceError as exc:
+            raise SliceError(f"{exc} Run dir: {run_dir}") from exc
 
     if result.tool_count != len(filaments):
         raise SliceError(

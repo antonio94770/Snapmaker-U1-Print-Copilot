@@ -1,7 +1,9 @@
+from pathlib import Path
+
 import pytest
 
 from print_copilot import actions
-from print_copilot.errors import ConfError, SliceError
+from print_copilot.errors import ConfError, ModelError, SliceError
 from print_copilot.orca.presets import PresetLibrary
 
 U1 = "Snapmaker U1 (0.4 nozzle)"
@@ -86,3 +88,78 @@ def test_compare_checks_every_variant_before_slicing(
 def test_compare_needs_variants(fake_install, model, library) -> None:
     with pytest.raises(SliceError, match="at least one variant"):
         actions.compare_variants(fake_install, model, actions.select_presets(library), [])
+
+
+TEE = Path(__file__).parent / "fixtures" / "tee.stl"
+
+
+def test_bed_size_and_threshold_from_presets(library: PresetLibrary) -> None:
+    selection = actions.select_presets(library, printer=U1, process=U1_PROCESS)
+    assert actions.bed_size(selection.machine) == pytest.approx((270.0, 270.0, 270.05))
+    assert actions.support_threshold(selection.process) == (30.0, None)
+
+
+def test_analyze_model_uses_presets(library: PresetLibrary) -> None:
+    selection = actions.select_presets(library)
+    analysis = actions.analyze_model(TEE, selection=selection)
+    assert analysis.threshold_deg == 30.0
+    assert all(c.fits_bed for c in analysis.candidates)
+    assert analysis.candidates[0].label == "+Z down"
+
+
+def test_analyze_model_rejects_bad_threshold() -> None:
+    with pytest.raises(ModelError, match="between 0 and 90"):
+        actions.analyze_model(TEE, threshold_deg=95)
+
+
+def test_optimize_orientation(fake_orca, fake_install, library, tmp_path) -> None:
+    selection = actions.select_presets(library)
+    report = actions.optimize_orientation(
+        fake_install, TEE, selection, top=2, work_dir=tmp_path / "runs"
+    )
+    # Two best candidates plus "as loaded", each sliced without and with supports.
+    assert [(s.candidate, s.support_mode) for s in report.slices] == [
+        ("+Z down", "none"),
+        ("+Z down", "tree"),
+        (report.slices[2].candidate, "none"),
+        (report.slices[2].candidate, "tree"),
+        ("as loaded", "none"),
+        ("as loaded", "tree"),
+    ]
+    assert len(fake_orca.commands) == 6
+    tree = report.slices[1]
+    # The fake slicer adds 100 mm of support (0.30 g) when supports are on.
+    assert tree.support_filament_mm == pytest.approx(100.0)
+    assert tree.support_filament_g == pytest.approx(3.95 * 100 / 1325.34, abs=0.01)
+    assert report.slices[0].support_filament_mm == 0
+    assert report.recommended.support_mode == "tree"
+    assert report.recommended.candidate == "+Z down"
+    assert report.recommended.model_path.name == "1-posZ_down.stl"
+    assert (report.work_dir / "report.json").is_file()
+    assert (report.work_dir / "analysis.json").is_file()
+    assert report.notes == []
+
+
+def test_optimize_orientation_without_supports_notes_it(
+    fake_orca, fake_install, library, tmp_path
+) -> None:
+    selection = actions.select_presets(library)
+    report = actions.optimize_orientation(
+        fake_install,
+        TEE,
+        selection,
+        top=1,
+        support_modes=["none"],
+        include_as_loaded=False,
+        work_dir=tmp_path,
+    )
+    assert len(report.slices) == 1
+    assert any("ignores overhangs" in n for n in report.notes)
+
+
+def test_optimize_orientation_rejects_unknown_mode(fake_install, library, tmp_path) -> None:
+    selection = actions.select_presets(library)
+    with pytest.raises(SliceError, match="Unknown support mode"):
+        actions.optimize_orientation(
+            fake_install, TEE, selection, support_modes=["raft"], work_dir=tmp_path
+        )

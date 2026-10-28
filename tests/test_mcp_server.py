@@ -1,6 +1,8 @@
 """MCP tools called directly as functions, plus the server's tool listing."""
 
 import asyncio
+import json
+from pathlib import Path
 
 import pytest
 from mcp.server.mcpserver.exceptions import ToolError
@@ -22,14 +24,18 @@ def env(monkeypatch, fake_install, tmp_path):
 def test_server_lists_the_tools() -> None:
     tools = asyncio.run(mcp_server.server.list_tools())
     assert sorted(t.name for t in tools) == [
+        "analyze_model",
         "compare_variants",
         "get_current_setup",
         "list_presets",
+        "optimize_orientation",
+        "render_model",
         "slice",
     ]
     for tool in tools:
         assert tool.description
-        assert tool.output_schema is not None
+        # render_model returns text plus an image, so it has no output schema.
+        assert (tool.output_schema is None) == (tool.name == "render_model")
 
 
 def test_list_presets() -> None:
@@ -81,3 +87,57 @@ def test_tool_error_reaches_the_client(fake_orca, model) -> None:
 
     with pytest.raises(ToolError, match="Error executing tool slice: Unknown process setting"):
         asyncio.run(call())
+
+
+TEE = str(Path(__file__).parent / "fixtures" / "tee.stl")
+
+
+def test_analyze_model() -> None:
+    data = mcp_server.analyze_model(TEE)
+    assert data["candidates"][0]["label"] == "+Z down"
+    assert data["threshold_deg"] == 30.0
+    assert any("Snapmaker_Orca.conf" in note for note in data["notes"])
+
+
+def test_optimize_orientation(fake_orca) -> None:
+    data = mcp_server.optimize_orientation(TEE, top=1, support_modes=["tree"])
+    assert [s["candidate"] for s in data["slices"]] == ["+Z down", "as loaded"]
+    assert data["recommended"]["support_mode"] == "tree"
+    assert data["recommended"]["support_filament_mm"] == 100.0
+    assert data["recommendation_rule"]
+
+
+def test_optimize_orientation_quality_with_protected_face(fake_orca) -> None:
+    data = mcp_server.optimize_orientation(
+        TEE,
+        goal="quality",
+        protect=[mcp_server.RegionSpec(label="cap top", direction=[0, 0, 1], angle_deg=10)],
+        top=1,
+        support_modes=["tree"],
+    )
+    assert data["goal"] == "quality"
+    assert data["analysis"]["regions"][0]["label"] == "cap top"
+    # Upside down puts the protected cap top on the bed, so it is not chosen.
+    assert data["recommended"]["candidate"] != "+Z down"
+    assert "quality" in data["recommendation_rule"] or "rank" in data["recommendation_rule"]
+
+
+def test_render_model_returns_text_and_image() -> None:
+    from mcp.server.mcpserver import Image
+
+    text, image = mcp_server.render_model(TEE, down_vector=[0, 0, 1], views=["front", "iso"])
+    info = json.loads(text)
+    assert isinstance(image, Image)
+    assert Path(info["png_path"]).is_file()
+    assert [v["name"] for v in info["views"]] == ["front", "iso"]
+    assert info["face_areas_mm2"]["on_bed"] == pytest.approx(450.0)
+    assert info["face_areas_mm2"]["needs_support"] == 0
+
+
+def test_render_model_through_the_server() -> None:
+    async def call():
+        return await mcp_server.server.call_tool("render_model", {"model": TEE})
+
+    result = asyncio.run(call())
+    kinds = [block.type for block in result.content]
+    assert kinds == ["text", "image"]

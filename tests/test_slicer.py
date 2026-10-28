@@ -8,7 +8,12 @@ import pytest
 from print_copilot.errors import SliceError
 from print_copilot.orca.install import OrcaInstall
 from print_copilot.orca.presets import PresetLibrary
-from print_copilot.orca.slicer import prepare_cli_settings, slice_model
+from print_copilot.orca.slicer import (
+    SettingsOverrides,
+    check_overrides_applied,
+    prepare_cli_settings,
+    slice_model,
+)
 
 U1 = "Snapmaker U1 (0.4 nozzle)"
 U1_PROCESS = "0.20mm Standard @Snapmaker U1 (0.4 nozzle)"
@@ -149,3 +154,43 @@ def test_wrong_printer_in_gcode_is_reported(
 def test_missing_model_fails(tmp_path, presets, install) -> None:
     with pytest.raises(SliceError, match="Model file not found"):
         slice_model(install, tmp_path / "nope.stl", *presets, work_dir=tmp_path)
+
+
+def test_silently_replaced_override_is_reported(fake_orca, presets, install, model, tmp_path):
+    # The real CLI slices `support_type = bogus` as normal(auto) without an error.
+    overrides = SettingsOverrides.from_flat({"enable_support": True, "support_type": "bogus"})
+    with pytest.raises(SliceError, match=r"did not apply the override support_type = 'bogus'"):
+        slice_model(install, model, *presets, work_dir=tmp_path, overrides=overrides)
+
+
+@pytest.mark.parametrize(
+    ("value", "written", "ok"),
+    [
+        ("0.20", "0.2", True),
+        ("30%", "30%", True),
+        ("30%", "30", False),
+        (["215"], "215,215,215,215", True),
+        (["215", "220"], "215,220", True),
+        (["215", "220"], "215,215", False),
+        ("a,b", "a,b", True),
+        ("tree(auto)", "normal(auto)", False),
+    ],
+)
+def test_check_overrides_applied(value, written, ok) -> None:
+    overrides = SettingsOverrides.from_flat({"key": value})
+    if ok:
+        check_overrides_applied({"key": written}, overrides)
+    else:
+        with pytest.raises(SliceError, match="did not apply"):
+            check_overrides_applied({"key": written}, overrides)
+
+
+def test_overrides_missing_from_config_block_are_not_checked() -> None:
+    check_overrides_applied({}, SettingsOverrides.from_flat({"key": "1"}))
+
+
+def test_too_long_work_dir_fails_before_slicing(fake_orca, presets, install, model, tmp_path):
+    deep = tmp_path / ("x" * 240)
+    with pytest.raises(SliceError, match="too long"):
+        slice_model(install, model, *presets, work_dir=deep)
+    assert fake_orca.commands == []

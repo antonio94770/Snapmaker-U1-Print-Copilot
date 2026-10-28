@@ -139,3 +139,64 @@ def test_compare_needs_a_variant(capsys, fake_install, model) -> None:
     args = ["compare", str(model), "--orca-exe", str(fake_install.exe)]
     assert cli.main([*args, "--orca-data", str(fake_install.data_dir)]) == 1
     assert "at least one --variant" in capsys.readouterr().err
+
+
+TEE = str(Path(__file__).parent / "fixtures" / "tee.stl")
+
+
+def test_analyze_text(capsys, orca_data) -> None:
+    assert cli.main(["analyze", TEE, "--orca-data", str(orca_data)]) == 0
+    out, err = capsys.readouterr()
+    assert "support threshold: 30 degrees" in out
+    assert " 1 +Z down" in out
+    assert "heuristic, not a slice" in out
+    assert "from Snapmaker_Orca.conf" in err
+
+
+def test_analyze_without_presets_json(capsys) -> None:
+    assert cli.main(["analyze", TEE, "--no-presets", "--threshold", "45", "--json"]) == 0
+    data = json.loads(capsys.readouterr().out)
+    assert data["threshold_deg"] == 45.0
+    assert data["candidates"][0]["fits_bed"] is None
+
+
+def test_orient(capsys, fake_orca, fake_install, tmp_path) -> None:
+    args = ["orient", TEE, "--orca-exe", str(fake_install.exe), "--top", "1"]
+    args += ["--orca-data", str(fake_install.data_dir), "--work-dir", str(tmp_path / "runs")]
+    assert cli.main([*args, "--support", "tree"]) == 0
+    out = capsys.readouterr().out
+    assert "<- recommended" in out
+    assert "1-posZ_down.stl" in out
+    assert len(fake_orca.commands) == 2  # best candidate + as loaded
+
+
+def test_render(capsys, tmp_path) -> None:
+    out = tmp_path / "tee.png"
+    args = ["render", TEE, "--no-presets", "--out", str(out), "--view", "front"]
+    face = '{"label": "cap", "direction": [0, 0, 1], "angle_deg": 10}'
+    assert cli.main([*args, "--down", "0,0,1", "--protect", face]) == 0
+    text = capsys.readouterr().out
+    assert out.read_bytes()[1:4] == b"PNG"
+    assert "protected needs support: 0.0 mm2" in text
+    # Never overwrite an existing file.
+    assert cli.main(args) == 1
+    assert "already exists" in capsys.readouterr().err
+
+
+def test_analyze_quality_with_protect(capsys) -> None:
+    face = '{"label": "cap", "direction": [0, 0, 1], "angle_deg": 10}'
+    args = ["analyze", TEE, "--no-presets", "--goal", "quality", "--protect", face]
+    assert cli.main(args) == 0
+    out = capsys.readouterr().out
+    assert "protected: cap (450.0 mm2)" in out
+    assert "lowest quality cost" in out
+    # Upside down would put the protected cap top on the bed.
+    first = next(line for line in out.splitlines() if line.startswith(" 1 "))
+    assert "+Z down" not in first
+
+
+def test_bad_protect_is_an_error(capsys) -> None:
+    assert cli.main(["analyze", TEE, "--no-presets", "--protect", "{nope"]) == 1
+    assert "not valid JSON" in capsys.readouterr().err
+    assert cli.main(["analyze", TEE, "--no-presets", "--protect", '{"colour": 1}']) == 1
+    assert "keys from" in capsys.readouterr().err

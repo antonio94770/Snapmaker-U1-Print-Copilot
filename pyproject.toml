@@ -9,7 +9,7 @@ description = "MCP server and CLI that prepares Snapmaker U1 prints with the Sna
 readme = "README.md"
 requires-python = ">=3.11"
 # License: GPL-3.0-or-later is planned but not yet confirmed by the maintainer.
-dependencies = ["mcp>=2.3,<3", "pydantic>=2"]
+dependencies = ["mcp>=2.3,<3", "numpy>=1.26", "pydantic>=2"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "ruff>=0.6"]

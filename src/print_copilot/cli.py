@@ -9,7 +9,9 @@ from pathlib import Path
 from typing import Any
 
 from print_copilot import __version__, actions
-from print_copilot.errors import PrintCopilotError, SliceError
+from print_copilot.errors import ModelError, PrintCopilotError, SliceError
+from print_copilot.model.orientation import GOALS, OrientationAnalysis, Region
+from print_copilot.model.render import VIEWS
 from print_copilot.orca.install import locate, locate_data_dir
 from print_copilot.orca.presets import DEFAULT_VENDOR, KINDS, PresetLibrary
 from print_copilot.orca.slicer import DEFAULT_TIMEOUT_S, SliceRun
@@ -198,6 +200,195 @@ def cmd_compare(args: argparse.Namespace) -> int:
     return 0
 
 
+def parse_regions(items: list[str] | None) -> list[Region] | None:
+    """`--protect` values: JSON objects with label, direction, angle_deg,
+    box_min_mm, box_max_mm (model coordinates as loaded, mm)."""
+    regions = []
+    for item in items or []:
+        try:
+            data = json.loads(item)
+        except ValueError as exc:
+            raise ModelError(f"--protect {item!r} is not valid JSON: {exc}") from exc
+        allowed = {"label", "direction", "angle_deg", "box_min_mm", "box_max_mm"}
+        if not isinstance(data, dict) or set(data) - allowed:
+            raise ModelError(
+                f"--protect {item!r} must be a JSON object with keys from {sorted(allowed)}."
+            )
+        region = Region(**data)
+        try:
+            region.validate()
+        except ValueError as exc:
+            raise ModelError(str(exc)) from exc
+        regions.append(region)
+    return regions or None
+
+
+def parse_vector(text: str | None) -> list[float] | None:
+    if text is None:
+        return None
+    try:
+        values = [float(v) for v in text.split(",")]
+    except ValueError as exc:
+        raise ModelError(f"Expected three comma-separated numbers, got {text!r}.") from exc
+    if len(values) != 3:
+        raise ModelError(f"Expected three comma-separated numbers, got {text!r}.")
+    return values
+
+
+def _area(value: float | None) -> str:
+    return "-" if value is None else f"{value:.1f}"
+
+
+def _print_analysis(analysis: OrientationAnalysis) -> None:
+    sx, sy, sz = analysis.size_mm
+    print(f"Model: {analysis.model}")
+    print(
+        f"  {analysis.face_count} triangles, {analysis.object_count} object(s), "
+        f"{analysis.volume_mm3:.0f} mm3, {sx:g} x {sy:g} x {sz:g} mm as loaded"
+    )
+    print(f"  support threshold: {analysis.threshold_deg:g} degrees, goal: {analysis.goal}")
+    protected = analysis.protected_area_mm2 is not None
+    if protected:
+        names = ", ".join(r.label for r in analysis.regions)
+        print(f"  protected: {names} ({analysis.protected_area_mm2:.1f} mm2)")
+    header = (
+        f"{'#':>2} {'orientation':<26} {'height':>7} {'contact':>9} {'overhang':>9} "
+        f"{'support':>10} {'stairs':>8}"
+    )
+    units = f"{'':>2} {'':<26} {'mm':>7} {'mm2':>9} {'mm2':>9} {'mm3':>10} {'mm2':>8}"
+    if protected:
+        header += f" {'P supp':>8} {'P bed':>8} {'P stair':>8}"
+        units += f" {'mm2':>8} {'mm2':>8} {'mm2':>8}"
+    quality = analysis.goal == "quality"
+    if quality:
+        header += f" {'cost':>8}"
+        units += f" {'mm2':>8}"
+    print(header + f" {'fits':>5}")
+    print(units)
+    for c in analysis.candidates:
+        fits = "?" if c.fits_bed is None else ("yes" if c.fits_bed else "NO")
+        if not c.stable:
+            fits += "*"
+        line = (
+            f"{c.rank:>2} {c.label[:26]:<26} {c.height_mm:>7.1f} {c.bed_contact_area_mm2:>9.1f} "
+            f"{c.overhang_area_mm2:>9.1f} {c.support_volume_mm3:>10.0f} {c.stair_area_mm2:>8.1f}"
+        )
+        if protected:
+            line += (
+                f" {_area(c.protected_overhang_area_mm2):>8}"
+                f" {_area(c.protected_bed_contact_area_mm2):>8}"
+                f" {_area(c.protected_stair_area_mm2):>8}"
+            )
+        if quality:
+            line += f" {c.quality_cost:>8.0f}"
+        print(line + f" {fits:>5}")
+    if not all(c.stable for c in analysis.candidates):
+        print("* stands on an edge or a point (bed contact under 5% of its footprint)")
+    print(f"Ranking: {analysis.ranking}.")
+    print(f"Heuristic: {analysis.heuristic}.")
+    for note in analysis.notes:
+        print(f"note: {note}")
+
+
+def cmd_analyze(args: argparse.Namespace) -> int:
+    selection = None
+    if not args.no_presets:
+        library = PresetLibrary(locate_data_dir(args.orca_data), vendor=args.vendor)
+        selection = _selection(args, library)
+    analysis = actions.analyze_model(
+        args.model,
+        selection=selection,
+        threshold_deg=args.threshold,
+        regions=parse_regions(args.protect),
+        goal=args.goal,
+    )
+    if args.json:
+        _print_json(analysis)
+    else:
+        _print_analysis(analysis)
+    return 0
+
+
+def _print_orientation_report(report: actions.OrientationReport) -> None:
+    _print_analysis(report.analysis)
+    print()
+    print(f"Sliced with {report.process} on {report.machine}:")
+    print(
+        f"{'#':>2} {'orientation':<22} {'support':<7} {'time':>10} {'grams':>7} "
+        f"{'supp g':>7} {'iface mm':>8} {'bridge':>7} {'layers':>6}"
+    )
+    for s in report.slices:
+        mark = " <- recommended" if s is report.recommended else ""
+        print(
+            f"{s.rank:>2} {s.candidate[:22]:<22} {s.support_mode:<7} "
+            f"{format_duration(s.estimated_time_s):>10} {s.total_filament_g:>7.2f} "
+            f"{s.support_filament_g:>7.2f} {s.support_interface_mm:>8.1f} "
+            f"{s.bridge_mm:>7.1f} {s.layer_count:>6d}{mark}"
+        )
+    print("Times and grams are the slicer's own figures; support grams, support interface")
+    print("and bridge lengths (mm of filament) are measured from the G-code toolpaths.")
+    print(f"Recommendation rule ({report.goal}): {report.recommendation_rule}.")
+    down = ", ".join(f"{v:g}" for v in report.recommended.down_vector)
+    print(f"Recommended: {report.recommended.candidate} (down vector {down})")
+    print(f"Recommended model file: {report.recommended.model_path}")
+    for note in report.notes:
+        print(f"note: {note}")
+    print(f"Work dir: {report.work_dir}")
+
+
+def cmd_orient(args: argparse.Namespace) -> int:
+    install = locate(args.orca_exe, args.orca_data)
+    library = PresetLibrary(install.data_dir, vendor=args.vendor)
+    regions = parse_regions(args.protect)
+    selection = _selection(args, library)
+    report = actions.optimize_orientation(
+        install,
+        args.model,
+        selection,
+        top=args.top,
+        support_modes=args.support or list(actions.DEFAULT_SUPPORT_MODES),
+        goal=args.goal,
+        regions=regions,
+        threshold_deg=args.threshold,
+        work_dir=args.work_dir,
+        timeout_s=args.timeout,
+    )
+    if args.json:
+        _print_json(report)
+    else:
+        _print_orientation_report(report)
+    return 0
+
+
+def cmd_render(args: argparse.Namespace) -> int:
+    selection = None
+    if not args.no_presets:
+        library = PresetLibrary(locate_data_dir(args.orca_data), vendor=args.vendor)
+        selection = _selection(args, library)
+    result = actions.render_model(
+        args.model,
+        down_vector=parse_vector(args.down),
+        regions=parse_regions(args.protect),
+        threshold_deg=args.threshold,
+        selection=selection,
+        views=args.view or actions.DEFAULT_VIEWS,
+        highlight=not args.no_highlight,
+        out_path=args.out,
+    )
+    if args.json:
+        _print_json(result)
+        return 0
+    print(f"Rendered {result.width_px} x {result.height_px} px: {result.png_path}")
+    print(f"  coordinates: {result.frame}")
+    for name, colour in result.legend.items():
+        print(f"  {colour}  {name.lower()}")
+    for name, area in result.face_areas_mm2.items():
+        print(f"  {name.replace('_', ' ')}: {area:.1f} mm2")
+    for note in result.notes:
+        print(f"note: {note}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="print-copilot",
@@ -256,13 +447,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="filament preset per tool head, in order T0, T1, ... (give one to use it on "
         "every head; default: the ones stored in Snapmaker Orca for the printer)",
     )
-    slicing.add_argument("--orca-exe", help="path to snapmaker-orca.exe")
-    slicing.add_argument("--work-dir", help="parent folder for run directories")
-    slicing.add_argument(
+    running = argparse.ArgumentParser(add_help=False)
+    running.add_argument("--orca-exe", help="path to snapmaker-orca.exe")
+    running.add_argument("--work-dir", help="parent folder for run directories")
+    running.add_argument(
         "--timeout", type=float, default=DEFAULT_TIMEOUT_S, help="slicer timeout in seconds"
     )
 
-    s = sub.add_parser("slice", parents=[common, slicing], help="slice a model headlessly")
+    s = sub.add_parser("slice", parents=[common, slicing, running], help="slice a model headlessly")
     s.add_argument(
         "--set",
         action="append",
@@ -274,7 +466,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     c = sub.add_parser(
         "compare",
-        parents=[common, slicing],
+        parents=[common, slicing, running],
         help="slice several override sets of one model and compare the measured results",
     )
     c.add_argument(
@@ -289,6 +481,88 @@ def build_parser() -> argparse.ArgumentParser:
         help='JSON list of {"label": "...", "overrides": {"KEY": VALUE, ...}}',
     )
     c.set_defaults(func=cmd_compare)
+
+    threshold = argparse.ArgumentParser(add_help=False)
+    threshold.add_argument(
+        "--threshold",
+        type=float,
+        help="support threshold angle in degrees from horizontal "
+        "(default: support_threshold_angle of the process preset)",
+    )
+    threshold.add_argument(
+        "--protect",
+        action="append",
+        metavar="JSON",
+        help='surface to keep clean, e.g. \'{"label": "face", "direction": [0, -1, 0], '
+        '"box_min_mm": [-8, -20, 30], "box_max_mm": [8, 0, 45]}\' (model coordinates as '
+        "loaded); repeatable",
+    )
+
+    goal = argparse.ArgumentParser(add_help=False)
+    goal.add_argument(
+        "--goal",
+        choices=list(GOALS),
+        default="speed",
+        help="what the ranking optimises (default speed; quality keeps protected surfaces clean)",
+    )
+
+    a = sub.add_parser(
+        "analyze",
+        parents=[common, slicing, threshold, goal],
+        help="rank candidate orientations with the overhang heuristic (no slicing)",
+    )
+    a.add_argument(
+        "--no-presets",
+        action="store_true",
+        help="do not read Snapmaker Orca presets (no bed-fit check, threshold 30 degrees)",
+    )
+    a.set_defaults(func=cmd_analyze)
+
+    o = sub.add_parser(
+        "orient",
+        parents=[common, slicing, running, threshold, goal],
+        help="slice the best candidate orientations with each support mode and recommend one",
+    )
+    o.add_argument(
+        "--top",
+        type=int,
+        default=actions.DEFAULT_TOP_CANDIDATES,
+        help=f"how many candidates to slice (default {actions.DEFAULT_TOP_CANDIDATES})",
+    )
+    o.add_argument(
+        "--support",
+        action="append",
+        choices=list(actions.SUPPORT_MODES),
+        help="support mode to slice each candidate with; repeatable "
+        f"(default: {' and '.join(actions.DEFAULT_SUPPORT_MODES)})",
+    )
+    o.set_defaults(func=cmd_orient)
+
+    r = sub.add_parser(
+        "render",
+        parents=[common, slicing, threshold],
+        help="render labelled views of a model to a PNG, highlighting supports and "
+        "protected surfaces",
+    )
+    r.add_argument(
+        "--down",
+        metavar="X,Y,Z",
+        help="show the print orientation in which this model direction faces the bed",
+    )
+    r.add_argument(
+        "--view",
+        action="append",
+        choices=list(VIEWS),
+        help=f"view to render; repeatable (default: {', '.join(actions.DEFAULT_VIEWS)})",
+    )
+    r.add_argument("--no-highlight", action="store_true", help="plain grey model")
+    r.add_argument("--out", help="PNG path (default: a new file under the work dir)")
+    r.add_argument(
+        "--no-presets",
+        action="store_true",
+        help="do not read Snapmaker Orca presets (support threshold 30 degrees)",
+    )
+    r.set_defaults(func=cmd_render)
     return parser
 
 

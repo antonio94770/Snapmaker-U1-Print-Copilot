@@ -21,5 +21,9 @@ class GcodeParseError(PrintCopilotError):
     """A G-code file lacks the summary lines a valid slice must contain."""
 
 
+class ModelError(PrintCopilotError):
+    """A model file cannot be read or contains no usable geometry."""
+
+
 class ConfError(PrintCopilotError):
     """`Snapmaker_Orca.conf` is missing, unreadable or lacks the expected keys."""
