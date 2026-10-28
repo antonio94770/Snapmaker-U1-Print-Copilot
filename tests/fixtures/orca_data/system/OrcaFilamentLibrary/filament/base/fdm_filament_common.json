@@ -1,0 +1,12 @@
+{
+    "type": "filament",
+    "name": "fdm_filament_common",
+    "from": "system",
+    "instantiation": "false",
+    "filament_diameter": [
+        "1.75"
+    ],
+    "nozzle_temperature": [
+        "200"
+    ]
+}

@@ -1,0 +1,10 @@
+{
+    "type": "filament",
+    "name": "Generic PLA @U1 base",
+    "inherits": "fdm_filament_pla",
+    "from": "system",
+    "instantiation": "false",
+    "filament_vendor": [
+        "Generic"
+    ]
+}

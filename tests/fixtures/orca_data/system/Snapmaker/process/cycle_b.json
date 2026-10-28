@@ -1,0 +1,7 @@
+{
+    "type": "process",
+    "name": "Cycle B",
+    "inherits": "Cycle A",
+    "from": "system",
+    "instantiation": "false"
+}

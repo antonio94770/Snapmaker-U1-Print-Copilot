@@ -1,0 +1,11 @@
+{
+    "type": "process",
+    "name": "0.20mm Standard @Snapmaker U1 (0.4 nozzle)",
+    "inherits": "fdm_process_U1_0.20",
+    "from": "system",
+    "instantiation": "true",
+    "sparse_infill_density": "15%",
+    "compatible_printers": [
+        "Snapmaker U1 (0.4 nozzle)"
+    ]
+}

@@ -1,0 +1,14 @@
+{
+    "type": "machine",
+    "name": "fdm_U1",
+    "inherits": "fdm_toolchanger",
+    "from": "system",
+    "instantiation": "false",
+    "printer_model": "Snapmaker U1",
+    "nozzle_diameter": [
+        "0.4",
+        "0.4",
+        "0.4",
+        "0.4"
+    ]
+}

@@ -1,0 +1,36 @@
+[build-system]
+requires = ["hatchling>=1.24"]
+build-backend = "hatchling.build"
+
+[project]
+name = "snapmaker-print-copilot"
+version = "0.1.0"
+description = "MCP server and CLI that prepares Snapmaker U1 prints with the Snapmaker Orca slicer"
+readme = "README.md"
+requires-python = ">=3.11"
+# License: GPL-3.0-or-later is planned but not yet confirmed by the maintainer.
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "ruff>=0.6"]
+
+[project.scripts]
+print-copilot = "print_copilot.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/print_copilot"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+extend-exclude = ["research"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "integration: needs a local Snapmaker Orca install (skipped when absent)",
+]

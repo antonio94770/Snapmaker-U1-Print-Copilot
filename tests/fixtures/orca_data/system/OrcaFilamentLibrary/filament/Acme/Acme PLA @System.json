@@ -1,0 +1,8 @@
+{
+    "type": "filament",
+    "name": "Acme PLA @System",
+    "inherits": "fdm_filament_pla",
+    "from": "system",
+    "instantiation": "true",
+    "compatible_printers": []
+}

@@ -1,0 +1,10 @@
+{
+    "type": "process",
+    "name": "fdm_process_U1",
+    "from": "system",
+    "instantiation": "false",
+    "layer_height": "0.2",
+    "wall_loops": "2",
+    "sparse_infill_density": "20%",
+    "wipe_tower_filament": "0"
+}

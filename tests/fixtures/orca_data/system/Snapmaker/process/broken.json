@@ -1,0 +1,7 @@
+{
+    "type": "process",
+    "name": "Broken Process",
+    "inherits": "does_not_exist",
+    "from": "system",
+    "instantiation": "true"
+}

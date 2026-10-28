@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+
+# Slicer run output (default runs go to %LOCALAPPDATA%, but local runs may land here)
+runs/
+*.gcode
+!tests/fixtures/*.gcode
+
+# Editors / OS
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store

@@ -1,0 +1,11 @@
+{
+    "type": "machine",
+    "name": "fdm_toolchanger",
+    "from": "system",
+    "instantiation": "false",
+    "nozzle_diameter": [
+        "0.4"
+    ],
+    "printer_model": "",
+    "gcode_flavor": "klipper"
+}

@@ -1,0 +1,8 @@
+{
+    "name": "My PLA",
+    "inherits": "Generic PLA",
+    "from": "User",
+    "nozzle_temperature": [
+        "215"
+    ]
+}
