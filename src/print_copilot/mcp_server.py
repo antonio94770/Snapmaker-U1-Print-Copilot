@@ -480,7 +480,8 @@ def inspect_project(
     use_printer: bool = True,
     process: str | None = None,
 ) -> dict[str, Any]:
-    """Read a 3MF project without slicing: who saved it, for which printer, its
+    """Read a 3MF project (or an STL, as one object with one uncoloured
+    filament) without slicing: who saved it, for which printer, its
     plates, the objects and filaments (number, colour, type) each plate uses,
     and for each plate the proposed U1 tool head per filament (nearest loaded
     colour, CIE76 delta E heuristic; identical colours share a head).
@@ -489,7 +490,7 @@ def inspect_project(
     settings that differ from the process preset (setting_differences). Tell
     the user the size and those differences before slicing.
 
-    model: absolute path of the .3mf.
+    model: absolute path of the .3mf or .stl.
     reduce_colours: merge the nearest colours when a plate needs more filaments
         than there are heads (heuristic; otherwise such a plate gets an error
         with the closest colour pairs).

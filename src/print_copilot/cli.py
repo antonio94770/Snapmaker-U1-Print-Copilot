@@ -1139,7 +1139,8 @@ def build_parser() -> argparse.ArgumentParser:
     pj = sub.add_parser(
         "project",
         parents=[common, slicing, project_opts],
-        help="show plates, objects and filaments of a 3MF project and the proposed tool heads",
+        help="show plates, objects and filaments of a 3MF project (or an STL) and the proposed "
+        "tool heads",
     )
     pj.add_argument(
         "--no-presets", action="store_true", help="do not read Snapmaker Orca (no head proposal)"

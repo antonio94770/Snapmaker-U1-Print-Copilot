@@ -146,6 +146,18 @@ def test_inspect_project(project_file, selection) -> None:
     assert any("layer_height 0.16 -> 0.2" in n for n in summary.notes)
 
 
+def test_inspect_plain_stl(selection) -> None:
+    summary = multicolor.inspect_project(TEE, selection)
+    assert summary.project == TEE
+    (plate,) = summary.plates
+    assert plate.objects == ["tee"]
+    assert [w.number for w in plate.filaments] == [1]
+    assert plate.fits_bed is True and plate.size_mm is not None
+    assert summary.setting_differences == []
+    assert any("tee.stl is a plain model" in n for n in summary.notes)
+    assert any("print in one colour" in n for n in summary.notes)
+
+
 def test_setting_differences_follow_overrides(project_file, selection) -> None:
     assert multicolor.setting_differences(project_file, selection, {"layer_height": 0.16}) == []
     differences = multicolor.setting_differences(

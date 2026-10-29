@@ -14,6 +14,7 @@ import json
 import os
 import shutil
 import subprocess
+import tempfile
 import uuid
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
@@ -358,8 +359,18 @@ def inspect_project(
     *,
     reduce_colours: bool = False,
 ) -> ProjectSummary:
-    """Plates, objects and filaments of a 3MF project and, with a selection,
-    the proposed head for every filament of each plate (no slicing)."""
+    """Plates, objects and filaments of a 3MF project (or an STL, read as a
+    one-object project) and, with a selection, the proposed head for every
+    filament of each plate (no slicing)."""
+    with tempfile.TemporaryDirectory(prefix="print-copilot-inspect-") as folder:
+        source, wrap_notes = _as_project(model, Path(folder))
+        summary = _inspect(source, selection, reduce_colours)
+    summary.project = Path(model)
+    summary.notes[:0] = wrap_notes
+    return summary
+
+
+def _inspect(model: Path, selection: Selection | None, reduce_colours: bool) -> ProjectSummary:
     project = read_project(model)
     heads = heads_for(selection) if selection else []
     bed = bed_size(selection.machine) if selection else None
