@@ -48,16 +48,20 @@ Result with `0.20mm Standard @Snapmaker U1 (0.4 nozzle)` + 4× Generic PLA:
 
 Gotchas found (all on 01.10.01.50):
 
-1. `--help` prints nothing useful. Option names were confirmed by searching
-   strings in `Snapmaker_Orca.dll` (`load_settings`, `load_filaments`,
-   `export_3mf`, `export_slicedata`, `outputdir`, `uptodate`,
-   `allow_newer_file`).
+1. The initial redirected-output probe captured no useful `--help` text.
+   **Correction on 2.4.1 (2026-10-29):** help prints in a real Windows console.
+   Its console attachment reopens streams on `CONOUT$`, bypassing our capture.
+   The old result does not establish missing help on the earlier release.
 2. **Paths must be Windows-style.** `/c/...` → "can not find setting file".
-3. **System presets crash the CLI** (segfault, exit 139) when passed directly.
-   Flatten the `inherits` chain first (`flatten.py`: merges parent → child by
-   `name` within `system/Snapmaker/<kind>/`).
-4. **Machine preset must have `"from": "system"`** after flattening. With
-   `"from": "User"` the CLI reports `process not compatible with printer`.
+3. **Passing the bundled presets directly crashes the CLI.** Working copies
+   flatten the inheritance chain and remove the process key in item 5.
+   The direct-preset result does not isolate inheritance as a separate bug;
+   the inherited process also contains the crashing key.
+4. Flattened copies with `"from": "User"` and no `inherits` were refused as
+   incompatible. **Correction on 2.4.1 (2026-10-29):** keeping `from=User` and
+   restoring `inherits="Snapmaker U1 (0.4 nozzle)"` succeeds. The CLI uses the
+   inherited system identity for compatibility checks; `from=system` is the
+   current workaround in this project, not a universal CLI requirement.
 5. **`wipe_tower_filament = "0"` in the U1 process preset segfaults the CLI.**
    Found by key bisection (`bisect.py`). Removing the key fixes it. Probably a
    Snapmaker Orca bug.
@@ -85,14 +89,18 @@ Slicing and G-code:
 
 Overrides, supports and toolpaths:
 
-- **Unknown enum values are replaced silently.** `support_type = bogus` slices
-  as `normal(auto)` with exit code 0. `slice_model` now compares every
-  override with the G-code config block and fails if it was not applied.
+- **Unknown enum values can be substituted with exit code 0.**
+  `support_type = bogus` becomes `normal(auto)`. The 2.4.1 audit confirmed an
+  info-level message with `--debug 4`; the original no-diagnostic claim was
+  incorrect. `slice_model` compares overrides with the G-code config block
+  and fails if a requested value was not applied.
 - `support_type` values `normal(auto)` and `tree(auto)` both work and show up
   in the config block; `enable_support = 0` gives no `;TYPE:Support` lines.
-- **Output path limit:** `--outputdir` longer than 229 characters fails with
+- **Measured output path limit:** a 229-character `--outputdir` works and
+  230 fails in the tested Windows environment with the generated filename:
   "GCode processor post process export failed. Cannot open file for writing."
-  (bisected: 229 works, 230 fails). `slice_model` checks this before running.
+  This is not a universal directory-length limit or a verified root cause.
+  `slice_model` currently uses the measured bound as a conservative check.
 - The CLI centres the model on the plate by itself (model at X/Y 0..30 →
   toolpath around X/Y 135); the rotated STL is still written centred with its
   lowest point at Z 0.
@@ -215,21 +223,46 @@ is under `runs/recheck241-complete/` (ignored). No printer calls were made.
 - **Still crashes (0xC0000005):** direct inherited system presets,
   `wipe_tower_filament="0"`, and `--export-3mf`. Export writes G-code first,
   then crashes without producing a 3MF; that remains a failed run.
-- **Still required:** Windows paths (`/c/...` is refused); machine `from=system`
-  (`User` is refused as incompatible); explicit colours for painting. Four
-  filament presets (one per head) were used throughout the recheck. A white cube with its bottom painted black uses T0/T1 and has
-  3 changes with colours; without them it uses only T0 with 0 changes.
-- **Still present:** an invalid support enum silently becomes `normal(auto)`;
-  output directory length 229 works, 230 fails; `--help` exits 0 with only
-  startup logs and no useful option documentation.
+- **Input requirements and corrections:** Windows paths (`/c/...` is refused)
+  and explicit colors for the painting probe. A machine marked `from=User`
+  works when its system `inherits` reference is preserved; the earlier claim
+  that `from=system` is always required was incorrect. Four filament presets
+  were used throughout. A white cube with its bottom painted black uses T0/T1
+  and has 3 changes with colors; without them it uses only T0 with 0 changes.
+- **Enum/logging and help corrections (2026-10-29):** invalid `support_type`
+  becomes `normal(auto)` with exit 0, but `--debug 4` logs the substitution
+  at info level. `--help` prints the option list in a real Windows console;
+  our redirected-output capture missed the reopened `CONOUT$` streams.
+  The original missing-help and wholly-silent-substitution claims are withdrawn.
+- **Output path observation:** directory length 229 works and 230 fails for
+  the tested generated filename on this Windows installation. Do not treat
+  that threshold as a universal directory limit or a confirmed root cause.
 - **Plate-only crash fixed:** adding a `<plate>` section to the prepared copy
-  now succeeds with identical measurements (3915 s, 19.61 g, 108 changes).
-  A copy with `Application=Snapmaker_Orca-2.4.1` but no project settings or
-  plates still crashes. A complete generated project loads, but the resulting
-  config changes `enable_prime_tower` from 1 to 0: 2039 s / 7.78 g instead of
-  3915 s / 19.61 g, same 108 changes. These are controlled synthetic probes,
-  not proof that every downloaded project loads correctly. **Keep the copy
-  workaround**, including stripping embedded project settings.
+  succeeds with identical measurements (3915 s, 19.61 g, 108 changes).
+  A synthetic copy with `Application=Snapmaker_Orca-2.4.1` but no project
+  settings or plates still crashes. This is a robustness case involving
+  incomplete metadata, not proof that ordinary GUI-saved projects fail.
+- **Generated-project/tower audit (2026-10-29):** the original generator writes
+  `version` as a JSON array where the project loader expects a string, causing
+  a config parse error. After correcting it to the string `2.4.1.0`, the
+  project loads without that error, but four differently colored filament
+  configurations sharing the same preset name still disable the tower.
+  Changing only the names to distinct values preserves it (both controls exit
+  0 with one G-code, effective `enable_prime_tower` 0 versus 1, the same four
+  colors). Separately, explicit `--filament-colour` values also preserve it in
+  the original probe. Info/warning logs explain the single-filament mapping
+  decision. The historical 2039 s / 7.78 g versus 3915 s / 19.61 g measurements
+  are from the original probes, not these corrected controls. Keep the current
+  slicing-copy workaround; this audit does not establish that all generated
+  projects lose their tower or fix the project's generator.
+
+  Corrected source context: [console help](https://github.com/Snapmaker/OrcaSlicer/blob/v2.4.1/src/Snapmaker_Orca.cpp#L6160),
+  [User preset identity](https://github.com/Snapmaker/OrcaSlicer/blob/v2.4.1/src/Snapmaker_Orca.cpp#L1780),
+  [substitution logging](https://github.com/Snapmaker/OrcaSlicer/blob/v2.4.1/src/Snapmaker_Orca.cpp#L1745),
+  and [filament-name deduplication](https://github.com/Snapmaker/OrcaSlicer/blob/v2.4.1/src/Snapmaker_Orca.cpp#L1937).
+  Local commands and raw logs are retained under `runs/issue-audit-20261029/`
+  and `runs/issue-correction-check/`; the corrected tower reproducer is also
+  included in [#1119](https://github.com/Snapmaker/OrcaSlicer/issues/1119).
 - **Purge matrix remains ineffective on this U1 probe:** all-zero and all-500
   matrices produce identical 3915 s / 19.61 g / 108 changes. `prime_volume=5`
   instead of the bundled 45 gives 3165 s / 13.35 g; tower disabled gives
@@ -272,6 +305,17 @@ is under `runs/recheck241-complete/` (ignored). No printer calls were made.
   config block shows only the process value. Likewise a MakerWorld figure with
   `enable_support = 1` on the object prints supports while the config block
   says `enable_support = 0`.
+- **GUI project load resets unlisted keys (2.4.1, checked 2026-10-29):** when
+  the app opens a 3MF, [`load_external_preset`](https://github.com/Snapmaker/OrcaSlicer/blob/v2.4.1/src/libslic3r/Preset.cpp)
+  sets every key not named in that preset's `different_settings_to_system`
+  entry (process, filaments..., machine; keys joined by `;`) back to the
+  named preset's value. Separately, a `version` stored as a JSON array makes
+  the GUI log `type must be string, but is array` and skip the keys sorted
+  after it (`wall_loops`). A generated project with both defects opened with
+  2 walls / 15% although it stored 4 / 25% (GUI slice 96.20 g versus 113.11 g
+  from the CLI, which keeps the stored values). With the changed keys listed
+  and `version` a string, the GUI shows 4 / 25% and its own slice measures
+  113.11 g, 3 h 33 min 55 s, equal to the CLI.
 
 Still open: 2.4.1 GUI round-trip/launch into an already-running instance,
 per-layer colour changes, PrusaSlicer painting, layer-height ranges, hardware

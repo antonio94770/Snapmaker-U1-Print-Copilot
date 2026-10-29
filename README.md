@@ -18,6 +18,30 @@ simulator (`print-copilot printer fake`). Upload, start and RFID head mapping
 were also checked on a real U1, see [verified facts](docs/verified-facts.md).
 The demo is rebuilt with `research/demo/`.
 
+### Complex community models
+
+![Measured optimization candidates for Haku and the Mechanical Planetarium housing](docs/images/optimization.gif)
+
+[35-second optimization MP4](docs/images/optimization.mp4), assembled from
+actual slicer measurements and previews. Restoring Haku's saved process and
+then using the installed U1 preset's prime volume saves **20.80 g and
+39 min 35 s** in the controlled comparison, keeping the tower, layer height,
+speeds, walls and supports. Flipping the planetarium housing eliminates
+58.30 g of supports when automatic supports are enabled in both positions;
+against an unsupported reference it uses slightly more material.
+These are candidates for review, with calibration and Haku's layer-count
+audit still unresolved; no physical print or assembly is claimed.
+See [comparisons, limitations and reproduction](docs/optimization-results.md),
+[the initial model trials](docs/complex-model-trials.md) and
+[model imagery attribution](docs/images/complex-models-attribution.md).
+
+**Novice workflow trial:** the [first replay](docs/novice-workflow-trial.md)
+selected and exported four walls / 25% infill, but the 3MF opened in Orca with
+the preset defaults of two walls / 15%. The cause was two defects in the
+exported project settings; after the fix, the reopened project shows 4 / 25%
+and Orca's own slice measures the same 113.11 g / 3 h 33 min 55 s as the paired
+CLI G-code. The failed run and the post-fix replay are both documented.
+
 ## What a session looks like
 
 An example conversation. The numbers are from a real slice of
@@ -67,7 +91,8 @@ Beyond a generic slicer wrapper:
 - **Snapmaker Orca CLI workarounds** found by testing, so headless slicing of
   U1 projects works (see [How slicing works](docs/usage.md#how-slicing-works)).
 
-Status: working end to end on Windows with Snapmaker Orca 2.4.1. Two real
+Status: working end to end on Windows with Snapmaker Orca 2.4.1, including
+exported projects that reopen in the app with the chosen settings. Two real
 prints on a U1 went through upload, start and RFID head mapping; what was and
 was not verified on hardware is listed in
 [docs/verified-facts.md](docs/verified-facts.md). Cancel and heaters-off have

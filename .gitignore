@@ -22,3 +22,6 @@ Thumbs.db
 # Local development notes (not published)
 HANDOFF.md
 CLAUDE.local.md
+
+# Third-party showcase inputs retain their own licenses, not the code license.
+research/showcase/models/
