@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from print_copilot import __version__, actions, multicolor, quality
+from print_copilot import __version__, actions, multicolor, quality, settings_advice
 from print_copilot.errors import ConfirmationError, ModelError, PrintCopilotError, SliceError
 from print_copilot.model.orientation import GOALS, OrientationAnalysis, Region
 from print_copilot.model.render import VIEWS
@@ -319,6 +319,49 @@ def cmd_analyze(args: argparse.Namespace) -> int:
         _print_json(analysis)
     else:
         _print_analysis(analysis)
+    return 0
+
+
+def cmd_suggest(args: argparse.Namespace) -> int:
+    selection = _selection(args, _preset_library(args))
+    suggestion = settings_advice.suggest_settings(args.model, selection, purpose=args.purpose)
+    if args.variants_out:
+        out = Path(args.variants_out)
+        if out.exists():
+            raise ModelError(f"{out} already exists; choose another path.")
+        out.write_text(
+            json.dumps(to_jsonable(suggestion.variants), indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
+    if args.json:
+        _print_json(suggestion)
+        return 0
+    g = suggestion.geometry
+    t = g.thickness
+    sx, sy, sz = g.size_mm
+    print(f"Model: {suggestion.model} ({g.face_count} triangles, {sx:g} x {sy:g} x {sz:g} mm)")
+    print(f"Process: {suggestion.process}; purpose: {suggestion.purpose or 'not given'}")
+    contact = "-" if g.height_to_contact is None else f"{g.height_to_contact:g}"
+    print(
+        f"  bed contact {g.bed_contact_area_mm2:.0f} mm2 (height / sqrt(contact) {contact}), "
+        f"stair share {g.stair_share:.0%} of {g.upward_area_mm2:.0f} mm2 upward surface"
+    )
+    print(
+        f"  outline thinner than {t.thin_limits_mm[0]:g} / {t.thin_limits_mm[1]:g} mm: "
+        f"{t.thin_shares[0]:.1%} / {t.thin_shares[1]:.1%} of {t.outline_mm:.0f} mm sampled "
+        f"on {t.sections} sections; thinnest {t.min_thickness_mm} mm"
+    )
+    if not suggestion.proposals:
+        print("No setting proposals for this model.")
+    for p in suggestion.proposals:
+        print(f"- {p.key}: {p.current} -> {p.proposed} ({p.basis})\n    {p.reason}")
+    for v in suggestion.variants:
+        print(f"variant: {v.display_label()}: {v.overrides}")
+    if args.variants_out:
+        print(f"Variants written to {args.variants_out}; slice them with quality --variants-file.")
+    print(f"Heuristic: {suggestion.heuristic}.")
+    for note in suggestion.notes:
+        print(f"note: {note}")
     return 0
 
 
@@ -965,6 +1008,22 @@ def build_parser() -> argparse.ArgumentParser:
         help="do not read Snapmaker Orca presets (no bed-fit check, threshold 30 degrees)",
     )
     a.set_defaults(func=cmd_analyze)
+
+    sgs = sub.add_parser(
+        "suggest",
+        parents=[common, slicing],
+        help="propose process settings from the model's shape and purpose (heuristic, no slicing)",
+    )
+    sgs.add_argument(
+        "--purpose",
+        choices=list(settings_advice.PURPOSES),
+        help="visual (looks matter) or functional (strength matters); "
+        "without it only the geometry checks run",
+    )
+    sgs.add_argument(
+        "--variants-out", help="write the proposed variants as JSON for quality --variants-file"
+    )
+    sgs.set_defaults(func=cmd_suggest)
 
     o = sub.add_parser(
         "orient",

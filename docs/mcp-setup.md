@@ -37,6 +37,7 @@ Optional environment variables (the same ones the CLI reads):
 | `slice` | slices a model headlessly with optional setting overrides and returns the slicer's time, grams per head and layers | `print-copilot slice` |
 | `compare_variants` | slices one model once per override set and returns a comparison table | `print-copilot compare` |
 | `analyze_model` | ranks candidate orientations of an STL/3MF with a geometric overhang heuristic (no slicing) | `print-copilot analyze` |
+| `suggest_settings` | proposes the few process settings the model's shape and purpose bear on (thin features: wall generator; tall on a small base: brim; visual: layer height; functional: walls and infill), with the evidence for each, as variants for `review_print` (heuristic, no slicing) | `print-copilot suggest` |
 | `optimize_orientation` | slices the best candidate orientations with each support mode (none / normal / tree) and recommends one for the goal (speed, quality, min_support) | `print-copilot orient` |
 | `render_model` | returns a PNG of labelled views (as loaded or in a print orientation) with bed contact, supports and protected surfaces coloured, so the agent can look at the model | `print-copilot render` |
 | `inspect_project` | reads a 3MF project (Snapmaker Orca, Bambu Studio, PrusaSlicer): plates, objects and their size in mm, whether each plate fits the bed, the filaments each plate uses, the U1 tool head proposed for each from the loaded colours, settings the objects set themselves, and saved settings that differ from the process preset | `print-copilot project` |
@@ -71,7 +72,8 @@ filament presets (filament overrides apply to every head). Keys the preset does
 not define are rejected.
 
 `analyze_model` numbers (overhang area, support volume) are a labelled
-heuristic. `optimize_orientation` reports the slicer's time and grams and the
+heuristic, and so are the `suggest_settings` proposals: they say which
+settings are worth slicing, and `review_print` measures what they cost. `optimize_orientation` reports the slicer's time and grams and the
 support material measured from the G-code's `;TYPE:Support` toolpaths; it
 writes each rotated model as an STL you can open in Snapmaker Orca.
 

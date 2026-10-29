@@ -33,7 +33,7 @@ from mcp.types import (
 )
 from pydantic import BaseModel, Field
 
-from print_copilot import __version__, actions, multicolor, quality
+from print_copilot import __version__, actions, multicolor, quality, settings_advice
 from print_copilot.errors import ConfirmationError, PrintCopilotError
 from print_copilot.model.orientation import Region
 from print_copilot.orca.install import locate, locate_data_dir
@@ -74,7 +74,9 @@ Usual flow:
 3. Optional: slice_project / compare_strategies (tool changes, prime tower,
    supports; on the U1 the purge matrix has no effect), analyze_model,
    render_model and optimize_orientation for orientation (protect regions with
-   goal="quality" for surfaces that must print cleanly).
+   goal="quality" for surfaces that must print cleanly). Then ask whether the
+   print is visual or functional and call suggest_settings on the model as it
+   will print; its variants are heuristics to slice in review_print.
 4. Check quality: review_print (effective-settings audit and toolpath images)
    and preview_gcode on critical layers; an inventoried setting is not an
    automatically validated one. If the user skips it, at least
@@ -312,6 +314,35 @@ def analyze_model(
     )
     analysis.notes = selection.notes + analysis.notes
     return to_jsonable(analysis)
+
+
+@server.tool(annotations=READ_ONLY)
+@_tool_errors
+def suggest_settings(
+    model: str,
+    purpose: Literal["visual", "functional"] | None = None,
+    printer: str | None = None,
+    process: str | None = None,
+) -> dict[str, Any]:
+    """Propose the few process settings this model's shape and purpose bear on
+    (thin features -> wall generator; tall on a small base -> brim; visual ->
+    layer height; functional -> walls and infill), with the evidence for each.
+    Heuristic, no slicing. In a project, objects' own settings win over these.
+
+    model: absolute path of the STL/3MF as it will be printed (Z up); after
+        optimize_orientation, pass the rotated STL it wrote.
+    purpose: visual (looks matter) or functional (strength matters). Ask the
+        user; without it only the geometry checks run.
+    printer, process: presets the proposals start from; omitted ones come from
+        the selection in Snapmaker Orca.
+    Returns geometry facts, proposals (current value, proposed value, reason,
+    basis) and variants: pass them to review_print or compare_variants to get
+    measured time and grams and to inspect the toolpaths before choosing.
+    """
+    selection = actions.select_presets(_preset_library(), printer=printer, process=process)
+    suggestion = settings_advice.suggest_settings(model, selection, purpose=purpose)
+    suggestion.notes = selection.notes + suggestion.notes
+    return to_jsonable(suggestion)
 
 
 @server.tool(annotations=SLICING)

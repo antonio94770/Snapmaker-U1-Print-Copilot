@@ -153,6 +153,22 @@ def test_analyze_text(capsys, orca_data) -> None:
     assert "from Snapmaker_Orca.conf" in err
 
 
+def test_suggest_writes_variants_for_quality(capsys, orca_data, tmp_path) -> None:
+    out_file = tmp_path / "variants.json"
+    args = ["suggest", TEE, "--orca-data", str(orca_data), "--purpose", "functional"]
+    assert cli.main([*args, "--variants-out", str(out_file)]) == 0
+    out = capsys.readouterr().out
+    assert "wall_loops: 2 -> 4 (rule of thumb)" in out
+    variants = json.loads(out_file.read_text(encoding="utf-8"))
+    assert variants[0] == {
+        "overrides": {"wall_loops": 4, "sparse_infill_density": "25%"},
+        "label": "suggested settings (heuristic)",
+    }
+    # Never overwrites an existing file.
+    assert cli.main([*args, "--variants-out", str(out_file)]) == 1
+    assert "already exists" in capsys.readouterr().err
+
+
 def test_analyze_without_presets_json(capsys) -> None:
     assert cli.main(["analyze", TEE, "--no-presets", "--threshold", "45", "--json"]) == 0
     data = json.loads(capsys.readouterr().out)

@@ -46,6 +46,7 @@ def test_server_lists_the_tools() -> None:
         "slice",
         "slice_project",
         "start_print",
+        "suggest_settings",
         "upload_to_printer",
     ]
     for tool in tools:
@@ -125,6 +126,14 @@ def test_analyze_model() -> None:
     data = mcp_server.analyze_model(TEE)
     assert data["candidates"][0]["label"] == "+Z down"
     assert data["threshold_deg"] == 30.0
+    assert any("Snapmaker_Orca.conf" in note for note in data["notes"])
+
+
+def test_suggest_settings() -> None:
+    data = mcp_server.suggest_settings(TEE, purpose="functional")
+    assert {p["key"] for p in data["proposals"]} == {"wall_loops", "sparse_infill_density"}
+    assert data["variants"][0]["overrides"] == {"wall_loops": 4, "sparse_infill_density": "25%"}
+    assert "heuristic" in data["heuristic"]
     assert any("Snapmaker_Orca.conf" in note for note in data["notes"])
 
 

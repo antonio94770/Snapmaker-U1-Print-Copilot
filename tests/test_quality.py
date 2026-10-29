@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -296,3 +297,32 @@ def test_finer_candidate_respects_declared_machine_limits(library):
     assert candidate.overrides == {"layer_height": 0.1}
     selection.process.settings["layer_height"] = "0.08"
     assert quality.finer_layer_variant(selection) is None
+
+
+@pytest.mark.parametrize("support_toolpaths", [False, True])
+def test_overhang_warning_trusts_support_toolpaths(
+    gcode, tmp_path, monkeypatch, library, support_toolpaths
+):
+    """Objects in a project can turn supports on while the process, and so the
+    config block, says off: only missing support toolpaths raise the warning."""
+    text = gcode.read_text(encoding="utf-8").replace(
+        "; CONFIG_BLOCK_END", "; enable_support = 0\n; CONFIG_BLOCK_END"
+    )
+    if support_toolpaths:
+        text = text.replace(";TYPE:Top surface", ";TYPE:Support\nG1 X12 E1\n;TYPE:Top surface")
+    gcode.write_text(text, encoding="utf-8")
+    selection = actions.select_presets(
+        library,
+        printer="Snapmaker U1 (0.4 nozzle)",
+        process="0.20mm Standard @Snapmaker U1 (0.4 nozzle)",
+        filaments=["Generic PLA"],
+    )
+    tee = str(Path(__file__).parent / "fixtures" / "tee.stl")
+    monkeypatch.setattr(
+        actions, "run_slice", lambda *args, **kwargs: SimpleNamespace(gcode_path=gcode)
+    )
+    report = quality.review_print(
+        tee, install=SimpleNamespace(), selection=selection, compare=False, work_dir=tmp_path
+    )
+    codes = {f.code for f in report.variants[0].audit.findings}
+    assert ("overhangs_without_support" in codes) is not support_toolpaths

@@ -63,6 +63,12 @@ FILAMENT_COLOUR_KEY = "filament_colour"
 # (verified on 01.10.01.50).
 PROCESS_EXTRA_KEYS: frozenset[str] = frozenset({"wipe_tower_x", "wipe_tower_y"})
 
+# Process keys the U1 presets leave at the slicer default that an override
+# may still set. `brim_type`: the G-code config block shows `auto_brim` when
+# the key is absent, and `no_brim` / `outer_only` when it is overridden, with
+# the brim toolpaths changing accordingly (verified on 2.4.1, 2026-10-29).
+OVERRIDABLE_DEFAULT_KEYS: frozenset[str] = frozenset({"brim_type"})
+
 # Keys that identify a preset or are set by the CLI workarounds. Overriding
 # them would make a run misreport which presets it used.
 PROTECTED_KEYS: frozenset[str] = frozenset(
@@ -145,12 +151,12 @@ def apply_overrides(
                 f"The process setting {key!r} cannot be overridden: it is removed before "
                 "slicing because it crashes the Snapmaker Orca CLI."
             )
-        if key not in settings:
+        if key not in settings and not (section == "process" and key in OVERRIDABLE_DEFAULT_KEYS):
             raise SliceError(
                 f"Unknown {section} setting {key!r}: the flattened preset {preset_name!r} "
                 "does not define it. Check the spelling against the preset JSON."
             )
-        current = settings[key]
+        current = settings.get(key)
         if isinstance(value, list):
             if not isinstance(current, list):
                 raise SliceError(

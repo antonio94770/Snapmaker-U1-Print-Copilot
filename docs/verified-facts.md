@@ -250,6 +250,29 @@ is under `runs/recheck241-complete/` (ignored). No printer calls were made.
   79.24 g, 353 changes**, tower enabled. Different release and process from the
   historical 4h 42m result; do not use the pair as a like-for-like benchmark.
 
+- **`wall_generator` override (checked 2026-10-29):** `arachne` (a value used
+  by profiles shipped in `resources/profiles/*/process`; the U1 presets use
+  `classic`) passed as a process override reaches the G-code config block
+  (`wall_generator = arachne`) and changes the toolpaths: on a 20 mm wide,
+  0.6 mm thick fin at 0.20mm Standard, the fin layers extrude 95.6 mm of
+  filament as outer wall with `classic` and 69.4 mm with `arachne` (the fin's
+  volume is about 80 mm). Slicer toolpaths only; no physical print.
+- **`brim_type` (checked 2026-10-29):** the U1 process presets leave the key
+  out and the config block shows the slicer default `auto_brim`. Passed as an
+  override (`no_brim`, `outer_only`) it reaches the config block and the
+  `;TYPE:Brim` toolpaths follow it, also in an exported project sliced as a
+  whole. `auto_brim` added a brim to a 5 x 5 x 60 mm pillar (15.5 mm of
+  filament) but none to a 20 mm cube or to a 100 mm figure standing on
+  335 mm2; `outer_only` on that figure: 45.8 mm, 3472 -> 3512 s,
+  12.22 -> 12.36 g (slicer figures).
+- **Object settings beat process overrides (checked 2026-10-29):** in a
+  two-cube project where one object sets `sparse_infill_density = 80%`,
+  overriding the process to 5% cut the sparse infill by 519 mm without the
+  object setting but only by 262 mm with it: the object kept its 80%. The
+  config block shows only the process value. Likewise a MakerWorld figure with
+  `enable_support = 1` on the object prints supports while the config block
+  says `enable_support = 0`.
+
 Still open: 2.4.1 GUI round-trip/launch into an already-running instance,
 per-layer colour changes, PrusaSlicer painting, layer-height ranges, hardware
 pre-extrusion and print quality without the tower. The old 0.08 mm comparison

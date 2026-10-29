@@ -18,6 +18,7 @@ from typing import Literal
 
 from print_copilot import actions, multicolor
 from print_copilot.errors import PrintCopilotError
+from print_copilot.gcode.features import feature_extrusion
 from print_copilot.gcode.header import parse_gcode, read_config_block
 from print_copilot.gcode.paths import read_paths
 from print_copilot.orca.heads import HeadAssignment
@@ -400,7 +401,13 @@ def review_print(
                 variant.model_preview = rendered.png_path
                 evidence[str(rendered.png_path)] = file_hash(rendered.png_path)
                 overhang = rendered.face_areas_mm2.get("needs_support", 0)
-                if overhang and effective.get("enable_support") == "0":
+                # Objects can turn supports on themselves while the process
+                # (and so the config block) says off: trust the toolpaths.
+                if (
+                    overhang
+                    and effective.get("enable_support") == "0"
+                    and feature_extrusion(gcode).support_mm == 0
+                ):
                     variant.audit.findings.append(
                         Finding(
                             "overhangs_without_support",
@@ -409,7 +416,10 @@ def review_print(
                             f"The model renderer flags {overhang:g} mm2 of downward-facing surface "
                             "using its heuristic threshold. Some spans may be printable bridges; "
                             "the geometry score does not establish a defect.",
-                            [Evidence("enable_support", "0", "G-code CONFIG_BLOCK")],
+                            [
+                                Evidence("enable_support", "0", "G-code CONFIG_BLOCK"),
+                                Evidence("support toolpaths", "0 mm", "G-code ;TYPE: features"),
+                            ],
                             "Inspect these regions; compare orientation and support strategies "
                             "before acceptance.",
                             heuristic=True,

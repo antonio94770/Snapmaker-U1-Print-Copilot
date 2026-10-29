@@ -44,6 +44,16 @@ def test_from_flat_rejects_bad_keys(key) -> None:
         SettingsOverrides.from_flat({key: "1"})
 
 
+def test_brim_type_can_be_set_although_the_preset_leaves_it_out() -> None:
+    settings = {"wall_loops": "2"}
+    apply_overrides(settings, {"brim_type": "outer_only"}, section="process", preset_name="P")
+    assert settings["brim_type"] == "outer_only"
+    with pytest.raises(SliceError, match="Unknown process setting 'brim_typo'"):
+        apply_overrides(settings, {"brim_typo": "x"}, section="process", preset_name="P")
+    with pytest.raises(SliceError, match="Unknown machine setting 'brim_type'"):
+        apply_overrides({}, {"brim_type": "outer_only"}, section="machine", preset_name="M")
+
+
 def test_values_are_stored_as_preset_strings() -> None:
     settings = {"wall_loops": "2", "enable_support": "0", "density": "15%", "temp": ["220"]}
     apply_overrides(

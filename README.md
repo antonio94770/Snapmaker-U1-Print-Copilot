@@ -94,6 +94,21 @@ volume that overestimates); the slice table shows the slicer's own time and
 grams, plus the support filament measured from the G-code's support
 toolpaths. Each rotated model is saved as an STL in the run folder.
 
+Choose the settings the model's shape bears on. `suggest` measures thin
+features (horizontal sections, local thickness), surfaces where layer steps
+show and the bed contact, and proposes a few process settings for the print's
+purpose: variable-width walls for thin features, an outer brim for a tall part
+on a small base, finer layers for a visual print, more walls and infill for a
+functional one. It does not slice; the proposals are a labelled heuristic,
+written as variants that `quality` slices and compares. In a 3MF project,
+settings an object sets itself win over these proposals for that object, and
+`suggest` names them:
+
+```bash
+print-copilot suggest model.stl --purpose visual --variants-out variants.json
+print-copilot quality model.stl --head 1 --variants-file variants.json
+```
+
 Some surfaces matter more than others: a miniature's face, a logo, the side
 that will be seen. Render the model, mark those surfaces as protected and rank
 for quality instead of speed:
