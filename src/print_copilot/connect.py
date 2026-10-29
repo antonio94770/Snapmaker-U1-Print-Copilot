@@ -5,7 +5,9 @@ absolute path of the `print-copilot-mcp.exe` installed next to the running
 Python, so nobody has to edit paths by hand. File locations and formats follow
 each client's documentation (checked 2026-10-29, see docs/mcp-setup.md):
 
-    claude-desktop  %APPDATA%\\Claude\\claude_desktop_config.json   mcpServers
+    claude-desktop  claude_desktop_config.json in                   mcpServers
+                    %LOCALAPPDATA%\\Claude-Data\\claude_<id>\\, else
+                    in %APPDATA%\\Claude\\
     vscode          ~/.copilot/mcp-config.json ($COPILOT_HOME)      mcpServers
     cursor          ~/.cursor/mcp.json                              mcpServers, type stdio
     codex           ~/.codex/config.toml                            [mcp_servers.<name>]
@@ -69,10 +71,7 @@ def _home() -> Path:
 
 def config_path(client: str) -> Path:
     if client == "claude-desktop":
-        appdata = os.environ.get("APPDATA")
-        if not appdata:
-            raise ConnectError("APPDATA is not set; cannot find Claude Desktop's settings.")
-        return Path(appdata) / "Claude" / "claude_desktop_config.json"
+        return _claude_desktop_config()
     if client == "vscode":
         base = os.environ.get("COPILOT_HOME")
         return (Path(base) if base else _home() / ".copilot") / "mcp-config.json"
@@ -81,6 +80,38 @@ def config_path(client: str) -> Path:
     if client == "codex":
         return _home() / ".codex" / "config.toml"
     raise ConnectError(f"{client} is configured through its own command, not a file.")
+
+
+def _claude_desktop_config() -> Path:
+    # Claude Desktop 4.29 from the Microsoft Store (seen 2026-10-29) keeps its
+    # settings in %LOCALAPPDATA%\Claude-Data\claude_<package id>\ and leaves only
+    # a `.user-data-left.<package id>` marker in %APPDATA%\Claude, which it no
+    # longer reads.
+    local = os.environ.get("LOCALAPPDATA")
+    folders = (
+        sorted(p for p in Path(local, "Claude-Data").glob("claude_*") if p.is_dir())
+        if local
+        else []
+    )
+    if len(folders) > 1:
+        raise ConnectError(
+            "Several Claude Desktop data folders: "
+            + ", ".join(str(p) for p in folders)
+            + ". Use Settings → Developer → Edit Config to see which one is in use and "
+            "add the server there by hand (docs/mcp-setup.md)."
+        )
+    if folders:
+        return folders[0] / "claude_desktop_config.json"
+    appdata = os.environ.get("APPDATA")
+    if not appdata:
+        raise ConnectError("APPDATA is not set; cannot find Claude Desktop's settings.")
+    legacy = Path(appdata) / "Claude"
+    if any(legacy.glob(".user-data-left.*")):
+        raise ConnectError(
+            f"Claude Desktop moved its settings out of {legacy}, and no Claude-Data folder "
+            "was found. Use Settings → Developer → Edit Config and add the server by hand."
+        )
+    return legacy / "claude_desktop_config.json"
 
 
 def connect(client: str, *, dry_run: bool = False, force: bool = False) -> ConnectResult:

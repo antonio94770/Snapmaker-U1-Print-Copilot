@@ -24,6 +24,7 @@ def home(tmp_path, monkeypatch) -> Path:
     home.mkdir()
     monkeypatch.setenv("USERPROFILE", str(home))
     monkeypatch.setenv("APPDATA", str(home / "AppData" / "Roaming"))
+    monkeypatch.setenv("LOCALAPPDATA", str(home / "AppData" / "Local"))
     monkeypatch.delenv("COPILOT_HOME", raising=False)
     return home
 
@@ -85,6 +86,27 @@ def test_claude_desktop_must_be_installed(home, exe) -> None:
     (home / "AppData" / "Roaming" / "Claude").mkdir(parents=True)
     result = connect.connect("claude-desktop")
     assert result.target.endswith("claude_desktop_config.json")
+
+
+def test_claude_desktop_store_build_uses_claude_data(home, exe) -> None:
+    roaming = home / "AppData" / "Roaming" / "Claude"
+    roaming.mkdir(parents=True)
+    (roaming / ".user-data-left.claude_abc123").write_bytes(b"")
+    with pytest.raises(ConnectError, match="moved its settings"):
+        connect.connect("claude-desktop")
+    data = home / "AppData" / "Local" / "Claude-Data" / "claude_abc123"
+    data.mkdir(parents=True)
+    (data / "claude_desktop_config.json").write_text(
+        json.dumps({"mcpServers": {"other": {"command": "npx"}}}), encoding="utf-8"
+    )
+    result = connect.connect("claude-desktop")
+    assert result.target == str(data / "claude_desktop_config.json")
+    servers = json.loads((data / "claude_desktop_config.json").read_text(encoding="utf-8"))
+    assert set(servers["mcpServers"]) == {"other", SERVER_NAME}
+    assert not (roaming / "claude_desktop_config.json").exists()
+    (data.parent / "claude_def456").mkdir()
+    with pytest.raises(ConnectError, match="Several Claude Desktop data folders"):
+        connect.connect("claude-desktop")
 
 
 def test_codex_table_is_appended(home, exe) -> None:
