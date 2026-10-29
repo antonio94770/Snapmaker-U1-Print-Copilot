@@ -18,3 +18,7 @@ runs/
 .idea/
 Thumbs.db
 .DS_Store
+
+# Local development notes (not published)
+HANDOFF.md
+CLAUDE.local.md

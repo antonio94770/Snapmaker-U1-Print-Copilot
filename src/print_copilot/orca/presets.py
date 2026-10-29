@@ -1,6 +1,6 @@
 """Read Snapmaker Orca presets and flatten their `inherits` chains.
 
-Layout (verified on Snapmaker Orca 01.10.01.50, HANDOFF.md section 3):
+Layout (verified on Snapmaker Orca 01.10.01.50, docs/verified-facts.md section 1):
 
     <data_dir>/system/<Vendor>/<kind>/**/*.json  system presets, one vendor per folder
     <data_dir>/user/<profile>/<kind>/*.json      user presets (profile is usually "default")

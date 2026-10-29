@@ -9,7 +9,7 @@ Each run gets a fresh directory that keeps everything needed to reproduce it:
     <run_dir>/out/plate_1.gcode                              slicer output
 
 The CLI workarounds below were all verified on Snapmaker Orca 01.10.01.50
-and rechecked on installed Windows 2.4.1 (HANDOFF.md sections 4 and 4c).
+and rechecked on installed Windows 2.4.1 (docs/verified-facts.md sections 2 and 4).
 Re-verify them on every new Snapmaker Orca release.
 """
 
@@ -44,7 +44,7 @@ MAX_OUTPUT_DIR_CHARS = 229
 
 # Process keys removed before slicing because they crash the CLI.
 # `wipe_tower_filament = "0"` in the U1 process presets segfaults the CLI
-# (found by key bisection, HANDOFF.md section 4, gotcha 5). Dropping it is
+# (found by key bisection, docs/verified-facts.md section 2, gotcha 5). Dropping it is
 # harmless: the G-code config block of multi-tool slices still shows
 # `wipe_tower_filament = 0`, the default (verified on 01.10.01.50).
 CRASHING_PROCESS_KEYS: tuple[str, ...] = ("wipe_tower_filament",)
@@ -255,7 +255,7 @@ def prepare_cli_settings(
     machine_s = copy.deepcopy(machine.settings)
     apply_overrides(machine_s, overrides.machine, section="machine", preset_name=machine.name)
     # With "from": "User" the CLI reports "process not compatible with printer"
-    # (HANDOFF.md section 4, gotcha 4).
+    # (docs/verified-facts.md section 2, gotcha 4).
     machine_s["from"] = "system"
 
     process_s = copy.deepcopy(process.settings)

@@ -2,8 +2,8 @@
 
 Guidance for AI coding agents (and humans) working on **Snapmaker Print Copilot**.
 
-Start with `HANDOFF.md`: it holds the verified findings, the open questions and
-the milestone plan. This file holds the rules that do not change.
+Verified Snapmaker Orca and U1 facts are in `docs/verified-facts.md`. This
+file holds the rules that do not change.
 
 ## What this project is
 
@@ -57,7 +57,7 @@ build another generic one.
    program, do not copy its source into this repository. Do not add dependencies
    with incompatible licenses.
 
-## Planned repository layout
+## Repository layout
 
 ```
 src/print_copilot/
@@ -86,7 +86,7 @@ same code paths.
 - Every slicer run gets its own fresh output directory and keeps its log, so a
   failure can be reproduced.
 
-## Commands (once the package exists)
+## Commands
 
 ```bash
 python -m venv .venv && .venv/Scripts/activate

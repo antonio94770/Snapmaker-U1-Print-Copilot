@@ -6,10 +6,10 @@ An AI agent (Claude Code, Codex, Claude Desktop, ...) or a person at the
 terminal can list presets, slice a model headlessly and compare the measured
 results.
 
-Status: early development (M5): presets, headless slicing, orientation
-search, multi-colour 3MF projects, a visual review workflow and printer access
-through Moonraker are available. Printer status is verified on a U1; upload
-and print start are not yet tried on hardware, see `HANDOFF.md`.
+Status: early development. Presets, headless slicing, orientation search,
+multi-colour 3MF projects, a visual review workflow and printer access through
+Moonraker are available. Printer status, upload and print start are verified
+on a U1 (see [docs/verified-facts.md](docs/verified-facts.md)).
 
 To use it from Claude Code, Codex or Claude Desktop, see
 [docs/mcp-setup.md](docs/mcp-setup.md).
@@ -213,7 +213,7 @@ sends nothing. `cancel` and `heaters-off` are never gated. Without a printer,
 ## How slicing works
 
 The Snapmaker Orca command line needs a few workarounds, found by testing
-(details in `HANDOFF.md` section 4):
+(details in `docs/verified-facts.md` section 2):
 
 - system presets are flattened (their `inherits` chain merged) before use;
 - the machine preset is marked `"from": "system"`;

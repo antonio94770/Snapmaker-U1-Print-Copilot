@@ -2,7 +2,7 @@
 Snapmaker Orca command line can slice.
 
 Project layout (read from projects saved by Bambu Studio 1.4 to 2.6 and
-Snapmaker Orca, downloaded for the M4 tests; loader rules read from
+Snapmaker Orca, downloaded for the integration tests; loader rules read from
 `bbs_3mf.cpp` in Snapmaker Orca v2.4.0):
 
     3D/3dmodel.model                 build items -> objects, usually with
@@ -18,7 +18,7 @@ Snapmaker Orca, downloaded for the M4 tests; loader rules read from
 references; the loader ignores metadata whose id matches no build item.
 Painted colours are a `paint_color` attribute on triangles (see `paint.py`).
 
-Snapmaker Orca CLI on 01.10.01.50 (all verified, HANDOFF.md section 4):
+Snapmaker Orca CLI on 01.10.01.50 (all verified, docs/verified-facts.md section 2):
 
 - any 3MF whose `Application` metadata starts with `BambuStudio-` or
   `Snapmaker_Orca-` crashes (exit 139) or is refused by a version check;
@@ -31,7 +31,7 @@ Snapmaker Orca CLI on 01.10.01.50 (all verified, HANDOFF.md section 4):
   presets ("Param values in 3mf/config error" with a Bambu project), so it is
   left out and the presets come from the command line.
 
-Installed Windows 2.4.1 recheck (HANDOFF.md section 4c): the plate-only crash
+Installed Windows 2.4.1 recheck (docs/verified-facts.md section 4): the plate-only crash
 is fixed, but an Application-only project still crashes. A complete generated
 project loads with the prime tower silently disabled, so the copy workaround
 is retained to preserve the settings sent by the caller.

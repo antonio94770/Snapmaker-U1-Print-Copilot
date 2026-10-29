@@ -1,7 +1,7 @@
 """Read the current printer / preset selection from `Snapmaker_Orca.conf`.
 
-Structure (read from the real file on Snapmaker Orca 01.10.01.50, HANDOFF.md
-section 4b):
+Structure (read from the real file on Snapmaker Orca 01.10.01.50,
+docs/verified-facts.md section 3):
 
     {
       "app": {"version": "01.10.01.50", "curr_bed_type": "4", ...},

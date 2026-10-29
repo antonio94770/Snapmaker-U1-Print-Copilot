@@ -1,7 +1,7 @@
 # Snapmaker Orca CLI probe (2026-10-28)
 
 Throwaway scripts used to verify headless slicing on Snapmaker Orca 01.10.01.50.
-Findings are summarised in `HANDOFF.md` §4. Not part of the package.
+Findings are summarised in `docs/verified-facts.md` section 2. Not part of the package.
 
 - `cube.stl` — 20 mm test cube.
 - `flatten.py <system_dir> <kind> <preset name> <out.json>` — resolves the

@@ -1,4 +1,4 @@
-"""Download the public multi-colour 3MF projects used to test M4.
+"""Download the public multi-colour 3MF projects used by the integration tests.
 
 Usage: python download_projects.py <empty folder>
 

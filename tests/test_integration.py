@@ -31,7 +31,7 @@ def test_slice_cube_u1_standard_pla(real_install, real_process_name, tmp_path) -
     run = slice_model(real_install, CUBE, machine, process, filaments, work_dir=tmp_path)
     result = run.result
 
-    # Reference on Snapmaker Orca 01.10.01.50: 15m 1s and 3.65 g (HANDOFF.md section 4).
+    # Reference on Snapmaker Orca 01.10.01.50: 15m 1s and 3.65 g (docs/verified-facts.md section 2).
     # The range allows small drift so a minor slicer update does not break the test.
     assert 600 <= result.estimated_time_s <= 1500
     assert 3.0 <= result.total_filament_g <= 4.5

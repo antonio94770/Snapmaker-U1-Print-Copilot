@@ -49,62 +49,45 @@ R = TypeVar("R")
 
 INSTRUCTIONS = """\
 Prepares Snapmaker U1 prints with the Snapmaker Orca slicer on this computer.
-Before calling a setup reviewed, use review_print for the effective-settings
-audit and actual toolpath images. Inspect model views and critical layers with
-preview_gcode, and read warning/unverified findings. record_quality_review is
-an explicit visual-review attestation, not permission to print or a physical
-quality guarantee. Finer layers are a heuristic candidate, not a calibrated
-winner. Never claim all inventoried parameters were automatically validated.
-If you skip review_print (a quick one-colour print the user wants now), at
-least run preview_gcode on the layers where supports and overhangs start,
-and tell the user the full review was not run.
-Start with get_current_setup to see the printer, process and per-head filaments
-selected in the app, and list_presets to find other preset names. slice and
-compare_variants run the real slicer headlessly: their times and grams are the
-slicer's own figures, never estimates. Overrides use preset JSON keys
-(e.g. sparse_infill_density="30%", wall_loops=3); prefix machine. or filament.
-for those presets. Unknown keys are rejected, and so is a value the slicer
-silently replaced. analyze_model ranks orientations with a fast geometric
-heuristic; optimize_orientation confirms the best ones with real slices
-(support none / normal / tree) and writes the rotated models as STL files.
-Look before you decide: render_model shows the model as an image. If some
-surface must print cleanly (a miniature's face, text, the side that will be
-seen), pass it as a protect region with goal="quality", then render the
-recommended down_vector with the same regions to check it. Tell the user which
-numbers are measured by the slicer and which are heuristic.
-slice prints an STL with T0; to print it with another head use the
-project tools below with head (they accept STL files too).
-Projects (3MF from Snapmaker Orca, Bambu Studio, MakerWorld or Printables, or
-an STL): inspect_project shows plates, the filaments each plate uses and the
-tool head proposed for each from the colours loaded on the U1. The loaded
-colours come from the printer's RFID readers when it answers, otherwise from
-the app's selection (the notes say which). A one-colour plate or STL is never
-put on a head automatically: show the user the loaded spools and ask which one
-to print with, then pass head. Before slicing, tell the user the plate size
-and, from inspect_project (pass the process you will use), the settings
-the project was saved with that differ from that process and the settings
-its objects set themselves; ask which values to keep when they matter
-(layer height, supports). slice_project slices one plate and measures
-tool changes, prime tower, purge and support grams; compare_strategies tries
-the prime tower off and one object at a time, or any variants you pass.
-To prepare a print, use export_project: it writes the project for the app,
-slices that same project, puts the .gcode next to the .3mf and opens the
-project in Snapmaker Orca so the user sees it before anything is uploaded.
-Upload that .gcode and tell the user the .3mf path: it is the file to reopen
-(open_in_orca) to see or change what was printed.
-On the U1 the purge matrix has no effect: what costs time and material is the
-number of tool changes and the prime tower. If the plate's colours are not the
-loaded ones, tell the user which filament to load on which head.
-Printer (Moonraker; the U1 is found on the network automatically, and
-discover_printers lists what answered): printer_status shows state,
-temperatures and the spool each head's RFID reader identified;
-list_printer_files lists stored G-code. upload_to_printer copies a sliced U1
-G-code file to the printer and never starts it. To start, call
-plan_print_start, show the user the plan (file, request, per-head checks)
-and call start_print with its token only after the user explicitly says to
-start that file. A quality review, an upload or a paired printer is not
-consent. Never start a print on your own initiative. cancel_print and
-heaters_off are safety actions and need no confirmation."""
+Rules first:
+- Never start a print on your own initiative. Call plan_print_start, show the
+  user the plan (file, request, per-head checks) and call start_print with its
+  token only after the user explicitly says to start that file. A quality
+  review, an upload or a reachable printer is not consent. cancel_print and
+  heaters_off are safety actions and need no confirmation.
+- Times, grams, tool changes and supports from slicing tools are the slicer's
+  own figures; analyze_model scores and finer-layer candidates are heuristics.
+  Tell the user which is which.
+- A one-colour plate or STL is never put on a head automatically: show the
+  loaded spools and ask which one to print with, then pass head.
+Usual flow:
+1. get_current_setup (printer, process, per-head filaments in the app;
+   list_presets for other names) and printer_status (state and the spool each
+   head's RFID reader identified; the U1 is found on the network).
+2. inspect_project with the process you will use (3MF from Snapmaker Orca,
+   Bambu Studio, MakerWorld or Printables, or an STL): plates, size and fit,
+   filaments and proposed heads from the loaded colours (RFID, else the app;
+   the notes say which). Before slicing, tell the user the plate size, the
+   saved settings that differ from that process and the settings objects set
+   themselves; ask which to keep when they matter (layer height, supports). If
+   the plate's colours are not loaded, say which filament goes on which head.
+3. Optional: slice_project / compare_strategies (tool changes, prime tower,
+   supports; on the U1 the purge matrix has no effect), analyze_model,
+   render_model and optimize_orientation for orientation (protect regions with
+   goal="quality" for surfaces that must print cleanly).
+4. Check quality: review_print (effective-settings audit and toolpath images)
+   and preview_gcode on critical layers; an inventoried setting is not an
+   automatically validated one. If the user skips it, at least
+   preview the layers where supports and overhangs start and say the full
+   review was not run. record_quality_review is a visual-review attestation,
+   never permission to print or a physical guarantee.
+5. export_project writes the project, slices it, puts the .gcode next to the
+   .3mf and opens it in Snapmaker Orca for the user to see.
+6. upload_to_printer (never starts), then plan_print_start / start_print as
+   above. Tell the user the .3mf path: open_in_orca reopens what was printed.
+slice / compare_variants take STL files with T0 and preset JSON key overrides
+(sparse_infill_density="30%"; prefix machine. or filament.); unknown or
+silently replaced values are rejected."""
 
 server = MCPServer(name="snapmaker-print-copilot", version=__version__, instructions=INSTRUCTIONS)
 

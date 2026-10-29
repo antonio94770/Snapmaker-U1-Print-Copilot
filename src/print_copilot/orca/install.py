@@ -9,7 +9,7 @@ from pathlib import Path
 
 from print_copilot.errors import OrcaNotFoundError
 
-# Verified on Windows 11 with Snapmaker Orca 01.10.01.50 (HANDOFF.md section 3).
+# Verified on Windows 11 with Snapmaker Orca 01.10.01.50 (docs/verified-facts.md section 1).
 DEFAULT_EXE = Path(r"C:\Program Files\Snapmaker_Orca\snapmaker-orca.exe")
 DATA_DIR_NAME = "Snapmaker_Orca"
 
@@ -23,7 +23,7 @@ def to_windows_path(path: str | os.PathLike[str]) -> Path:
     """Return an absolute Windows-style path.
 
     The Snapmaker Orca CLI rejects MSYS paths such as `/c/Users/...` with
-    "can not find setting file" (HANDOFF.md section 4, gotcha 2), so they are
+    "can not find setting file" (docs/verified-facts.md section 2, gotcha 2), so they are
     rewritten to `C:/Users/...` before use.
     """
     text = os.fspath(path)

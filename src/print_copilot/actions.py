@@ -169,7 +169,7 @@ def select_presets(
     filament_p = [library.resolve("filament", name) for name in filaments]
     heads = tool_count(machine_p)
     if len(filament_p) == 1 and heads > 1:
-        # The slicer needs one filament per head (HANDOFF.md section 4, gotcha 7).
+        # The slicer needs one filament per head (docs/verified-facts.md section 2, gotcha 7).
         filament_p = filament_p * heads
         notes.append(f"using {filaments[0]!r} on all {heads} tool heads")
     # The colours stored for the printer describe what is loaded on each head,
