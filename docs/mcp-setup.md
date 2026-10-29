@@ -7,26 +7,24 @@ clients.
 
 ## 1. Install
 
-Download and install as described in the README's
-[Install](../README.md#install) section:
+Install as described in the README's [Install](../README.md#install) section:
 
 ```powershell
-git clone https://github.com/antonio94770/Snapmaker-U1-Print-Copilot.git
-cd Snapmaker-U1-Print-Copilot
-py -m venv .venv
-.venv\Scripts\python -m pip install -e .
+uv tool install https://github.com/antonio94770/Snapmaker-U1-Print-Copilot/archive/refs/heads/main.zip
 ```
 
-The easy way to connect an agent is one command in that folder, for example
-`.venv\Scripts\print-copilot connect claude-code` (also `codex`,
-`claude-desktop`, `vscode`, `cursor`, `gemini`). It writes what the sections
-below describe, with the right path, keeps the other servers and a `.bak` copy
-of the file; `--dry-run` shows the change without making it.
+The easy way to connect an agent is one command, for example
+`print-copilot connect claude-code` (also `codex`, `claude-desktop`,
+`vscode`, `cursor`, `gemini`). It writes what the sections below describe,
+with the right path, keeps the other servers and a `.bak` copy of the file;
+`--dry-run` shows the change without making it.
 
-To do it by hand: the server executable is
-`<repo>\.venv\Scripts\print-copilot-mcp.exe`. Use its **absolute path** in the
-client configs below; the examples assume the repository is at
-`C:\Users\you\Snapmaker-U1-Print-Copilot`.
+To do it by hand: `print-copilot connect cursor --dry-run` prints the path of
+the server executable. With uv's default folders it is
+`%APPDATA%\uv\tools\snapmaker-print-copilot\Scripts\print-copilot-mcp.exe`;
+from a source checkout it is `<repo>\.venv\Scripts\print-copilot-mcp.exe`.
+Use its **absolute path** in the client configs below; the examples assume
+the uv install for a user called `you`.
 
 Optional environment variables (the same ones the CLI reads):
 
@@ -111,7 +109,7 @@ Raise the client's tool timeout if slices get cut off (see below).
 ## 3. Claude Code
 
 ```bash
-claude mcp add --scope user snapmaker-print-copilot -- "C:\Users\you\Snapmaker-U1-Print-Copilot\.venv\Scripts\print-copilot-mcp.exe"
+claude mcp add --scope user snapmaker-print-copilot -- "C:\Users\you\AppData\Roaming\uv\tools\snapmaker-print-copilot\Scripts\print-copilot-mcp.exe"
 ```
 
 Add `--env PRINT_COPILOT_WORK_DIR=D:\print-runs` (repeatable) before the
@@ -125,7 +123,7 @@ Add to `~/.codex/config.toml` (`%USERPROFILE%\.codex\config.toml` on Windows):
 
 ```toml
 [mcp_servers.snapmaker-print-copilot]
-command = 'C:\Users\you\Snapmaker-U1-Print-Copilot\.venv\Scripts\print-copilot-mcp.exe'
+command = 'C:\Users\you\AppData\Roaming\uv\tools\snapmaker-print-copilot\Scripts\print-copilot-mcp.exe'
 args = []
 tool_timeout_sec = 600
 
@@ -139,14 +137,18 @@ check the server with `/mcp`.
 
 ## 5. Claude Desktop
 
-Settings → Developer → Edit Config opens
-`%APPDATA%\Claude\claude_desktop_config.json`. Add:
+Settings → Developer → Edit Config opens `claude_desktop_config.json`. The
+Microsoft Store build (4.29, checked 2026-10-29) keeps it in
+`%LOCALAPPDATA%\Claude-Data\claude_<id>\` and leaves only a
+`.user-data-left.*` marker in `%APPDATA%\Claude`, which it no longer reads;
+older builds use `%APPDATA%\Claude\claude_desktop_config.json`. `connect`
+picks the folder the installed build uses. Add:
 
 ```json
 {
   "mcpServers": {
     "snapmaker-print-copilot": {
-      "command": "C:\\Users\\you\\Snapmaker-U1-Print-Copilot\\.venv\\Scripts\\print-copilot-mcp.exe",
+      "command": "C:\\Users\\you\\AppData\\Roaming\\uv\\tools\\snapmaker-print-copilot\\Scripts\\print-copilot-mcp.exe",
       "args": [],
       "env": {}
     }
@@ -168,7 +170,7 @@ For every workspace, use the Copilot user file `~/.copilot/mcp-config.json`
 {
   "mcpServers": {
     "snapmaker-print-copilot": {
-      "command": "C:\\Users\\you\\Snapmaker-U1-Print-Copilot\\.venv\\Scripts\\print-copilot-mcp.exe",
+      "command": "C:\\Users\\you\\AppData\\Roaming\\uv\\tools\\snapmaker-print-copilot\\Scripts\\print-copilot-mcp.exe",
       "args": [],
       "env": {}
     }
@@ -191,7 +193,7 @@ project, or to `.cursor/mcp.json` in one project:
   "mcpServers": {
     "snapmaker-print-copilot": {
       "type": "stdio",
-      "command": "C:\\Users\\you\\Snapmaker-U1-Print-Copilot\\.venv\\Scripts\\print-copilot-mcp.exe",
+      "command": "C:\\Users\\you\\AppData\\Roaming\\uv\\tools\\snapmaker-print-copilot\\Scripts\\print-copilot-mcp.exe",
       "args": [],
       "env": {}
     }
@@ -205,7 +207,7 @@ and off. See [Cursor's MCP documentation](https://cursor.com/docs/mcp).
 ## 8. Gemini CLI
 
 ```bash
-gemini mcp add --scope user --timeout 600000 snapmaker-print-copilot "C:\Users\you\Snapmaker-U1-Print-Copilot\.venv\Scripts\print-copilot-mcp.exe"
+gemini mcp add --scope user --timeout 600000 snapmaker-print-copilot "C:\Users\you\AppData\Roaming\uv\tools\snapmaker-print-copilot\Scripts\print-copilot-mcp.exe"
 ```
 
 This writes the server into `~/.gemini/settings.json` (`--scope project`
@@ -230,7 +232,7 @@ The MCP Inspector (needs Node.js) starts the server and lets you call each
 tool by hand:
 
 ```bash
-npx @modelcontextprotocol/inspector "C:\Users\you\Snapmaker-U1-Print-Copilot\.venv\Scripts\print-copilot-mcp.exe"
+npx @modelcontextprotocol/inspector "C:\Users\you\AppData\Roaming\uv\tools\snapmaker-print-copilot\Scripts\print-copilot-mcp.exe"
 ```
 
 ## 11. Example prompts

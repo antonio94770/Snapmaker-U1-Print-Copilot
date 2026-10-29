@@ -12,6 +12,11 @@ license = "GPL-3.0-or-later"
 license-files = ["LICENSE"]
 dependencies = ["mcp>=2.3,<3", "numpy>=1.26", "pydantic>=2"]
 
+[project.urls]
+Homepage = "https://github.com/antonio94770/Snapmaker-U1-Print-Copilot"
+Documentation = "https://github.com/antonio94770/Snapmaker-U1-Print-Copilot/blob/main/docs/usage.md"
+Issues = "https://github.com/antonio94770/Snapmaker-U1-Print-Copilot/issues"
+
 [project.optional-dependencies]
 dev = ["pytest>=8", "ruff>=0.6"]
 

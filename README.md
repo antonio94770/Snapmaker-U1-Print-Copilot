@@ -9,7 +9,35 @@ strategies and settings, compare what the slicer measures, write the chosen
 setup as a project that opens in Snapmaker Orca, and send it to the printer
 only after the user confirms.
 
-What it knows about the U1, beyond a generic slicer wrapper:
+## What a session looks like
+
+An example conversation. The numbers are from a real slice of
+`tests/fixtures/tee.stl` with the U1's 0.16 mm Standard process and Snapmaker
+PLA SnapSpeed:
+
+```text
+You:    Print tee.stl in black. Which way up?
+Agent:  T1 has the black PLA. I sliced the best orientations:
+          as loaded, tree supports     18m 02s   3.99 g   (1.00 g of it support)
+          lying on its side (-Y down)   9m 16s   3.03 g   no support needed
+        Lying on its side is faster and needs no support. Write the project?
+You:    Yes.
+Agent:  Saved tee-u1.3mf and tee-u1.gcode and opened the project in Snapmaker
+        Orca. Uploaded the G-code to the U1; here is the start plan (file,
+        request, per-head checks). Start it?
+You:    Start.
+```
+
+| As loaded: red faces need support | Lying on its side: nothing to support |
+| --- | --- |
+| ![The T-shaped part standing upright, with the underside of both arms marked as needing support](docs/images/tee-as-loaded.png) | ![The same part lying on its side, its whole T-shaped face on the bed](docs/images/tee-y-down.png) |
+
+The agent looks at renders like these to decide which way up a part prints
+and which surfaces must stay clean.
+
+## What it knows about the U1
+
+Beyond a generic slicer wrapper:
 
 - **Four heads, real spools.** The filaments a plate uses are put on the head
   whose loaded colour is closest, read from the U1's RFID readers (or from the
@@ -28,7 +56,7 @@ What it knows about the U1, beyond a generic slicer wrapper:
   that shows the exact request and per-head checks; cancel and heaters-off
   are never gated.
 - **Snapmaker Orca CLI workarounds** found by testing, so headless slicing of
-  U1 projects works (see [How slicing works](#how-slicing-works)).
+  U1 projects works (see [How slicing works](docs/usage.md#how-slicing-works)).
 
 Status: working end to end on Windows with Snapmaker Orca 2.4.1. Two real
 prints on a U1 went through upload, start and RFID head mapping; what was and
@@ -36,12 +64,84 @@ was not verified on hardware is listed in
 [docs/verified-facts.md](docs/verified-facts.md). Cancel and heaters-off have
 not been sent to a printer yet.
 
-[Install it](#install) and [connect it to your AI agent](#connect-an-ai-agent)
-(Claude Code, Codex, Claude Desktop, VS Code, Cursor, Gemini CLI or another
-MCP client). Every MCP tool also has a CLI command, so nothing here needs an
-AI subscription.
+## Install
 
-## A typical session
+Windows only for now.
+
+**1. Prerequisites** (once):
+[Snapmaker Orca](https://www.snapmaker.com/snapmaker-orca), opened at least
+once, and [uv](https://docs.astral.sh/uv/getting-started/installation/), which
+installs Print Copilot and the Python it needs. To install uv, paste this into
+PowerShell:
+
+```powershell
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+```
+
+**2. Install Print Copilot.** Open a new PowerShell window and paste:
+
+```powershell
+uv tool install https://github.com/antonio94770/Snapmaker-U1-Print-Copilot/archive/refs/heads/main.zip
+print-copilot setup
+```
+
+`setup` should print your printer, process and filaments as selected in
+Snapmaker Orca. If it does, everything is installed. If PowerShell says
+`print-copilot` is not recognized, run `uv tool update-shell` and open a new
+window.
+
+**3. Connect your AI agent:**
+
+| Agent | Command |
+| --- | --- |
+| Claude Code | `print-copilot connect claude-code` |
+| Codex | `print-copilot connect codex` |
+| Claude Desktop | `print-copilot connect claude-desktop` |
+| VS Code (GitHub Copilot) | `print-copilot connect vscode` |
+| Cursor | `print-copilot connect cursor` |
+| Gemini CLI | `print-copilot connect gemini` |
+
+It adds the server to that agent's settings with the right path, keeps the
+other servers and a `.bak` copy of the file, and says what it changed
+(`--dry-run` only shows it). Restart the agent and ask: *"What printer and
+filaments do I have selected in Snapmaker Orca?"*
+
+**Update** with
+`uv tool install --reinstall https://github.com/antonio94770/Snapmaker-U1-Print-Copilot/archive/refs/heads/main.zip`;
+**remove** with `uv tool uninstall snapmaker-print-copilot`.
+
+<details>
+<summary>Problems, other agents, install from source</summary>
+
+- Gemini CLI turns MCP servers off in folders you have not trusted: accept
+  its trust prompt.
+- Large models can take minutes to slice: `connect` sets a 10-minute tool
+  timeout for Codex and Gemini CLI; for Claude Code start it with
+  `MCP_TOOL_TIMEOUT=600000`.
+- Another MCP client: add a stdio server whose command is the full path of
+  `print-copilot-mcp.exe`, with no arguments (`print-copilot connect cursor
+  --dry-run` prints that path). [docs/mcp-setup.md](docs/mcp-setup.md) shows
+  the settings for each agent by hand, the environment variables and the full
+  tool list.
+- From source, for development (needs [Git](https://git-scm.com/download/win)
+  and [Python](https://www.python.org/downloads/windows/) 3.11 or newer):
+
+  ```powershell
+  git clone https://github.com/antonio94770/Snapmaker-U1-Print-Copilot.git
+  cd Snapmaker-U1-Print-Copilot
+  py -m venv .venv
+  .venv\Scripts\python -m pip install -e ".[dev]"
+  .venv\Scripts\print-copilot setup
+  ```
+
+  Commands then run as `.venv\Scripts\print-copilot`, and `connect` points
+  the agent at this folder. If `git clone` reports "Filename too long", clone
+  into a shorter folder or run `git config --global core.longpaths true`
+  first.
+
+</details>
+
+## How the agent works
 
 With the MCP server connected, the agent follows the order the server
 describes:
@@ -61,293 +161,34 @@ describes:
 6. Uploads the G-code, shows the start plan and starts only after the user
    says so (`upload_to_printer`, `plan_print_start`, `start_print`).
 
-## Install
+## Without an AI agent
 
-**1. Get the prerequisites** (once):
-[Snapmaker Orca](https://www.snapmaker.com/snapmaker-orca), opened at least
-once; [Python](https://www.python.org/downloads/windows/) 3.11 or newer;
-[Git](https://git-scm.com/download/win). Windows only for now.
-
-**2. Install Print Copilot.** Open PowerShell in the folder where you keep
-programs (your user folder is fine) and paste:
+Every MCP tool has a `print-copilot` command, so nothing here needs an AI
+subscription. A few to start with:
 
 ```powershell
-git clone https://github.com/antonio94770/Snapmaker-U1-Print-Copilot.git
-cd Snapmaker-U1-Print-Copilot
-py -m venv .venv
-.venv\Scripts\python -m pip install -e .
-.venv\Scripts\print-copilot setup
-```
-
-The last command should print your printer, process and filaments as
-selected in Snapmaker Orca. If it does, everything is installed.
-
-**3. Connect your AI agent.** In the same folder, run the line for your agent:
-
-| Agent | Command |
-| --- | --- |
-| Claude Code | `.venv\Scripts\print-copilot connect claude-code` |
-| Codex | `.venv\Scripts\print-copilot connect codex` |
-| Claude Desktop | `.venv\Scripts\print-copilot connect claude-desktop` |
-| VS Code (GitHub Copilot) | `.venv\Scripts\print-copilot connect vscode` |
-| Cursor | `.venv\Scripts\print-copilot connect cursor` |
-| Gemini CLI | `.venv\Scripts\print-copilot connect gemini` |
-
-It adds the server to that agent's settings with the right path, keeps the
-other servers and a `.bak` copy of the file, and says what it changed
-(`--dry-run` only shows it). Restart the agent and ask: *"What printer and
-filaments do I have selected in Snapmaker Orca?"*
-
-Without an AI agent, use the same features from the command line: see
-[Usage](#usage).
-
-<details>
-<summary>Problems and other agents</summary>
-
-- No Git: on GitHub choose **Code → Download ZIP**, extract it, open
-  PowerShell in the extracted folder and start from `py -m venv .venv`.
-- `git clone` reports "Filename too long": clone into a shorter folder, or
-  run `git config --global core.longpaths true` first.
-- `py` is not found: use `python` instead.
-- Gemini CLI turns MCP servers off in folders you have not trusted: accept
-  its trust prompt.
-- Large models can take minutes to slice: `connect` sets a 10-minute tool
-  timeout for Codex and Gemini CLI; for Claude Code start it with
-  `MCP_TOOL_TIMEOUT=600000`.
-- Another MCP client: add a stdio server whose command is the full path of
-  `.venv\Scripts\print-copilot-mcp.exe`, with no arguments.
-  [docs/mcp-setup.md](docs/mcp-setup.md) shows the settings for each agent by
-  hand, the environment variables and the full tool list.
-- Update: run `git pull` in the folder. Development (tests, lint): install
-  with `-e ".[dev]"`.
-
-</details>
-
-## Usage
-
-List presets (Snapmaker vendor presets plus your own):
-
-```bash
-print-copilot presets --kind process
-print-copilot presets --kind filament --printer "Snapmaker U1 (0.4 nozzle)"
-```
-
-Slice a model. Give one `--filament` per tool head (T0..T3), or a single one to
-use it on every head:
-
-```bash
-print-copilot slice research/cli-probe/cube.stl --printer "Snapmaker U1 (0.4 nozzle)" --process "0.20mm High Quality @Snapmaker U1 (0.4 nozzle)" --filament "Generic PLA"
-```
-
-The command above uses the bundled 2.4.1 process name. On 01.10.01.50 the
-0.20 mm process was named `Standard`; use `presets` to check your installed names.
-
-Without `--printer`, `--process` or `--filament`, the selection stored in
-Snapmaker Orca is used (a note says so). Override settings for one run with
-`--set` (process keys, or `machine.KEY` / `filament.KEY`); unknown keys are
-rejected:
-
-```bash
-print-copilot slice research/cli-probe/cube.stl --set sparse_infill_density=30% --set wall_loops=3
-```
-
-Show what is selected in Snapmaker Orca (printer, process, filament and colour
-per tool head, purge volumes):
-
-```bash
-print-copilot setup
-```
-
-Compare variants of one model (each `--variant` is a `;`-separated list of
-overrides, an empty one is the presets as they are):
-
-```bash
-print-copilot compare research/cli-probe/cube.stl --variant "" --variant "sparse_infill_density=30%"
-```
-
-Add `--json` to any command for machine-readable output. Every slice runs
-in a fresh folder under `%LOCALAPPDATA%\print-copilot\runs` (override with
-`--work-dir` or `PRINT_COPILOT_WORK_DIR`) that keeps the flattened presets,
-the exact command line, the slicer log, the G-code and `result.json`.
-
-Other locations can be set with `--orca-exe` / `PRINT_COPILOT_ORCA_EXE` and
-`--orca-data` / `PRINT_COPILOT_ORCA_DATA`.
-
-Find a print orientation. `analyze` ranks candidate orientations (as loaded,
-the six axes, the largest flat faces) with a geometric overhang heuristic and
-does not slice; `orient` slices the best ones without and with supports and
-recommends one by the slicer's measured time:
-
-```bash
-print-copilot analyze tests/fixtures/tee.stl
-print-copilot orient tests/fixtures/tee.stl --top 3 --support none --support tree
-```
-
-The orientation table shows heuristic numbers (overhang area, a support
-volume that overestimates); the slice table shows the slicer's own time and
-grams, plus the support filament measured from the G-code's support
-toolpaths. Each rotated model is saved as an STL in the run folder.
-
-Choose the settings the model's shape bears on. `suggest` measures thin
-features (horizontal sections, local thickness), surfaces where layer steps
-show and the bed contact, and proposes a few process settings for the print's
-purpose: variable-width walls for thin features, an outer brim for a tall part
-on a small base, finer layers for a visual print, more walls and infill for a
-functional one. It does not slice; the proposals are a labelled heuristic,
-written as variants that `quality` slices and compares. In a 3MF project,
-settings an object sets itself win over these proposals for that object, and
-`suggest` names them:
-
-```bash
-print-copilot suggest model.stl --purpose visual --variants-out variants.json
-print-copilot quality model.stl --head 1 --variants-file variants.json
-```
-
-Some surfaces matter more than others: a miniature's face, a logo, the side
-that will be seen. Render the model, mark those surfaces as protected and rank
-for quality instead of speed:
-
-```bash
-print-copilot render model.stl --out views.png
-print-copilot orient model.stl --goal quality --protect "{\"label\": \"face\", \"direction\": [0, -1, 0], \"box_min_mm\": [-7, -13, 19], \"box_max_mm\": [7, -3, 32]}"
-print-copilot render model.stl --down 0,0,-1 --protect "{...same...}" --out check.png
-```
-
-`render` draws labelled views (grid in mm, axes) and colours the faces that
-rest on the bed, need support, are protected, or are protected and need
-support. A protected region is a direction cone, a box in the model's
-coordinates as loaded, or both. The `quality` goal ranks by a weighted surface
-cost (support scars and bed marks on protected surfaces weigh ten times more
-than elsewhere, layer steps less) and puts orientations that stand on an edge
-or a point last. An AI agent uses the same steps through MCP: it looks at the
-rendered image, decides which surface is the face, and checks the result.
-
-## Multi-colour projects on the U1
-
-3MF projects saved by Snapmaker Orca or Bambu Studio (for example downloads
-from MakerWorld or Printables) are read with their plates, per-object and
-per-part filaments and painted colours. Each filament a plate uses is put on
-the U1 head whose loaded colour is closest (CIE76 delta E, a heuristic);
-filaments of the same colour share a head, and you can fix any of them with
-`--map FILAMENT=T<head>`. The loaded colours come from the U1's RFID readers
-when the printer answers (`--no-printer` skips it), otherwise from the
-selection saved in Snapmaker Orca; the notes say which.
-
-An STL is handled as a one-object project. A plate or STL in one colour is
-never put on a head automatically: the command stops, lists the loaded spools
-and asks for `--head T<n>`.
-
-```bash
-print-copilot export-project funnel.stl --head T1 --out funnel-black.3mf
-```
-
-`export-project` writes the project, slices that same project and puts the
-G-code next to it (`funnel-black.gcode`, unless `--no-slice`). Upload that
-G-code; `funnel-black.3mf` is the file to reopen in Snapmaker Orca to see or
-change exactly what was printed.
-
-```bash
-print-copilot project mask.3mf
-print-copilot slice-project mask.3mf --plate 2
-print-copilot slice-project mask.3mf --plate 1 --map 1=T2 --map 8=T3
-print-copilot strategies mask.3mf --plate 7
-print-copilot export-project mask.3mf --plate 2 --out mask-plate2-u1.3mf --open
-```
-
-`slice-project` reports the slicer's time and grams per head plus what it
-measures in the G-code: tool changes, layers with changes, prime tower and
-purge grams. `strategies` slices the same plate as is, without the prime tower
-and one object at a time. `export-project --open` also opens the new 3MF in
-Snapmaker Orca. A plate that needs more colours than
-the four heads stops with the closest colour pairs; `--map` or
-`--reduce-colours` decide which colours share a head.
-
-On the U1 every head has its own nozzle, so the purge matrix does not change
-the slice (verified); what costs time and material is the number of tool
-changes and the prime tower. After the painting-remapping fix, the Spider-Man
-project (four filaments in two colours, identical colours sharing a head) was
-measured with 0.20 mm Standard layers and Generic PLA on 01.10.01.50:
-4 h 42 min, 79.9 g and 353 tool changes, with the prime tower enabled.
-The earlier 0.08 mm strategy comparison predates that fix and has been removed;
-it must be measured again before being used as a performance example.
-Print quality without the prime tower and the firmware's own pre-extrusion
-consumption remain unverified on hardware.
-
-## Quality review before printing
-
-`quality` audits the **effective G-code settings**, renders model and toolpath
-views, and compares the unchanged setup with a finer-layer candidate within
-the machine preset's limits. Every effective parameter is inventoried with
-its actual automatic-check coverage. Unverified calibration and hardware
-conditions stay visible; there is no promise of defect-free prints.
-
-```powershell
-print-copilot quality model.stl
-print-copilot quality painted-project.3mf --plate 1
-print-copilot quality plate_1.gcode
-print-copilot preview plate_1.gcode --layer 1 --layer 50
-```
-
-Open the generated `report.html` to compare measured slicing results and
-inspect all layers in the offline viewer. The initial status is pending visual
-review. `quality-review` records written observations and explicit acceptance
-of remaining findings; changed evidence invalidates the review. It never
-authorizes a physical print. MCP equivalents: `review_print`, `preview_gcode`,
-`record_quality_review`. See [docs/quality-review.md](docs/quality-review.md)
-for the checks, limitations and review procedure.
-
-## Printer (Moonraker)
-
-The U1 runs Moonraker on the LAN (port 80 and 7125, no login) and announces
-itself over mDNS, so its address is found on every run and never stored.
-`printer discover` lists what answered; `--printer-url` or
-`PRINT_COPILOT_PRINTER_URL` overrides discovery, and `PRINT_COPILOT_PRINTER_NAME`
-picks one of several U1 printers by device name:
-
-```bash
-print-copilot printer discover
+print-copilot orient model.stl --top 3 --support none --support tree
+print-copilot project downloaded.3mf
+print-copilot export-project downloaded.3mf --plate 1 --out my-print.3mf --open
 print-copilot printer status
-print-copilot printer upload part.gcode
-print-copilot printer start part.gcode --dry-run
+print-copilot printer start my-print.gcode --dry-run
 ```
 
-`status` shows the state, temperatures and, per head, the spool its RFID
-reader identified. `upload` only copies G-code sliced for the U1 and never
-starts it. `start` first prints the plan (the exact request, the slicer's
-time and grams stored in the file, per-head checks against nozzle and RFID
-spools) and sends only after you type `start` (or pass `--yes`); `--dry-run`
-sends nothing. `cancel` and `heaters-off` are never gated. Without a printer,
-`print-copilot printer fake` runs a fake U1 Moonraker on this computer.
+`orient` slices the best orientations with and without supports; `project`
+lists plates, filaments and the heads they would go on; `export-project`
+writes and slices a project for Snapmaker Orca; `printer start` shows the
+plan and sends only after you type `start`.
 
-## How slicing works
+## Documentation
 
-The Snapmaker Orca command line needs a few workarounds, found by testing
-(details in `docs/verified-facts.md` section 2):
-
-- system presets are flattened (their `inherits` chain merged) before use;
-- the machine preset is marked `"from": "system"`;
-- the `wipe_tower_filament` process key is removed (it crashes the CLI);
-- paths are passed Windows-style;
-- one filament preset is passed per tool head;
-- every override is checked against the config block of the G-code, because
-  the CLI silently replaces values it does not accept;
-- the output folder must stay within 229 characters, or the CLI cannot write
-  the G-code;
-- 3MF projects are sliced from a copy without plates and without the
-  `Application` tag, with the objects of one plate centred on the bed and
-  `--arrange 0`. The plate-only crash is fixed in 2.4.1, but partial project
-  metadata can still crash it and a full project probe silently disabled the
-  prime tower. The copy workaround remains necessary;
-- each head's colour is passed in its filament preset, otherwise the slicer
-  drops painted colours;
-- if the prime tower collides with an object, it is moved to a free corner
-  and a note says so.
-
-System presets are read from the user data's `system` folder when present;
-otherwise they are read from `resources/profiles` beside the selected executable
-(verified with Windows 2.4.1). User presets and selections still come from
-`%APPDATA%\Snapmaker_Orca`. Preset names are never substituted automatically.
-Your Snapmaker Orca installation and presets are only read, never modified.
+- [Command line reference](docs/usage.md): presets, slicing and variants,
+  multi-colour projects, quality review, printer, how slicing works.
+- [MCP setup by hand](docs/mcp-setup.md): settings for each agent,
+  environment variables, tool list.
+- [Quality review](docs/quality-review.md): the checks, their limits and the
+  review procedure.
+- [Verified facts](docs/verified-facts.md): what was checked in Snapmaker
+  Orca and on the U1, and how.
 
 ## Development
 
