@@ -17,7 +17,13 @@ py -m venv .venv
 .venv\Scripts\python -m pip install -e .
 ```
 
-The server executable is then
+The easy way to connect an agent is one command in that folder, for example
+`.venv\Scripts\print-copilot connect claude-code` (also `codex`,
+`claude-desktop`, `vscode`, `cursor`, `gemini`). It writes what the sections
+below describe, with the right path, keeps the other servers and a `.bak` copy
+of the file; `--dry-run` shows the change without making it.
+
+To do it by hand: the server executable is
 `<repo>\.venv\Scripts\print-copilot-mcp.exe`. Use its **absolute path** in the
 client configs below; the examples assume the repository is at
 `C:\Users\you\Snapmaker-U1-Print-Copilot`.
@@ -205,7 +211,10 @@ gemini mcp add --scope user --timeout 600000 snapmaker-print-copilot "C:\Users\y
 This writes the server into `~/.gemini/settings.json` (`--scope project`
 writes `.gemini/settings.json` instead). `--timeout` is in milliseconds; add
 `-e KEY=value` for environment variables. Do not add `--trust`: it skips
-Gemini's confirmation of each tool call. Check with `/mcp` inside a session.
+Gemini's confirmation of each tool call. Gemini CLI turns MCP servers off in
+folders you have not trusted ("MCP servers are configured but disabled because
+this folder is untrusted"): accept its trust prompt in the folder you start it
+from. Check with `/mcp` inside a session.
 See the [Gemini CLI MCP documentation](https://geminicli.com/docs/tools/mcp-server/).
 
 ## 9. Other clients

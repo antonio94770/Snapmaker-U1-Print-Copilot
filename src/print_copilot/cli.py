@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from print_copilot import __version__, actions, multicolor, quality, settings_advice
+from print_copilot import __version__, actions, connect, multicolor, quality, settings_advice
 from print_copilot.errors import ConfirmationError, ModelError, PrintCopilotError, SliceError
 from print_copilot.model.orientation import GOALS, OrientationAnalysis, Region
 from print_copilot.model.render import VIEWS
@@ -90,6 +90,31 @@ def cmd_setup(args: argparse.Namespace) -> int:
     others = [m for m in setup.known_machines if m != setup.machine]
     if others:
         print(f"  other printers with a stored selection: {', '.join(others)}")
+    return 0
+
+
+def cmd_connect(args: argparse.Namespace) -> int:
+    result = connect.connect(args.client, dry_run=args.dry_run, force=args.force)
+    if args.json:
+        _print_json(result)
+        return 0
+    messages = {
+        "added": f"Added {connect.SERVER_NAME} to {args.client}: {result.target}",
+        "already configured": f"{args.client} already uses this server: {result.target}",
+        "would add": f"Would add {connect.SERVER_NAME} to {result.target}",
+        "would run": f"Would run: {result.target}",
+    }
+    print(messages[result.action])
+    print(f"  server: {result.server_exe}")
+    if result.backup:
+        print(f"  previous file kept as {result.backup}")
+    for note in result.notes:
+        print(f"note: {note}")
+    if result.action == "added":
+        print(
+            f"Restart {args.client} and ask: "
+            '"What printer and filaments do I have selected in Snapmaker Orca?"'
+        )
     return 0
 
 
@@ -923,6 +948,18 @@ def build_parser() -> argparse.ArgumentParser:
         "--printer", help="show the stored selection of this machine instead of the current one"
     )
     st.set_defaults(func=cmd_setup)
+
+    cn = sub.add_parser(
+        "connect",
+        help="register the MCP server with an AI agent (writes its config, keeps a .bak)",
+    )
+    cn.add_argument("client", choices=list(connect.CLIENTS), help="the agent to set up")
+    cn.add_argument("--json", action="store_true", help="print JSON instead of text")
+    cn.add_argument("--dry-run", action="store_true", help="show what would change, change nothing")
+    cn.add_argument(
+        "--force", action="store_true", help="replace an existing entry with another command"
+    )
+    cn.set_defaults(func=cmd_connect)
 
     slicing = argparse.ArgumentParser(add_help=False)
     slicing.add_argument("model", help="STL/3MF model to slice")

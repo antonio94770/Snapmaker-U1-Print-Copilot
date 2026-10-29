@@ -63,94 +63,65 @@ describes:
 
 ## Install
 
-You need:
+**1. Get the prerequisites** (once):
+[Snapmaker Orca](https://www.snapmaker.com/snapmaker-orca), opened at least
+once; [Python](https://www.python.org/downloads/windows/) 3.11 or newer;
+[Git](https://git-scm.com/download/win). Windows only for now.
 
-- Windows with [Snapmaker Orca](https://www.snapmaker.com/snapmaker-orca)
-  installed (verified with 01.10.01.50 and 2.4.1 at
-  `C:\Program Files\Snapmaker_Orca\`) and started at least once, so that
-  `%APPDATA%\Snapmaker_Orca` exists;
-- [Python](https://www.python.org/downloads/windows/) 3.11 or newer;
-- [Git](https://git-scm.com/download/win), or download the repository as a
-  ZIP from GitHub (**Code → Download ZIP**) and extract it.
-
-In PowerShell:
+**2. Install Print Copilot.** Open PowerShell in the folder where you keep
+programs (your user folder is fine) and paste:
 
 ```powershell
 git clone https://github.com/antonio94770/Snapmaker-U1-Print-Copilot.git
 cd Snapmaker-U1-Print-Copilot
 py -m venv .venv
 .venv\Scripts\python -m pip install -e .
-```
-
-If `git clone` reports "Filename too long", clone into a shorter folder (the
-test fixtures add up to 97 characters to the folder path, and Windows allows
-260) or run `git config --global core.longpaths true` first.
-
-Check that it finds Snapmaker Orca and your presets:
-
-```powershell
 .venv\Scripts\print-copilot setup
 ```
 
-This prints the printer, process and filaments selected in Snapmaker Orca.
-The install creates two programs in `.venv\Scripts`: `print-copilot.exe`
-(the command line) and `print-copilot-mcp.exe` (the MCP server for AI
-agents). To update later, run `git pull` in the folder. For development
-(tests and lint), install with `-e ".[dev]"` instead.
+The last command should print your printer, process and filaments as
+selected in Snapmaker Orca. If it does, everything is installed.
 
-## Connect an AI agent
+**3. Connect your AI agent.** In the same folder, run the line for your agent:
 
-Every client starts the MCP server from its absolute path. The examples
-assume the repository is at `C:\Users\you\Snapmaker-U1-Print-Copilot`;
-replace it with yours. Restart the client after adding the server, and ask
-"What printer and filaments do I have selected in Snapmaker Orca?" to check.
-
-**Claude Code**
-
-```powershell
-claude mcp add --scope user snapmaker-print-copilot -- "C:\Users\you\Snapmaker-U1-Print-Copilot\.venv\Scripts\print-copilot-mcp.exe"
-```
-
-**Codex**: add to `%USERPROFILE%\.codex\config.toml`:
-
-```toml
-[mcp_servers.snapmaker-print-copilot]
-command = 'C:\Users\you\Snapmaker-U1-Print-Copilot\.venv\Scripts\print-copilot-mcp.exe'
-args = []
-tool_timeout_sec = 600
-```
-
-**Gemini CLI**
-
-```powershell
-gemini mcp add --scope user --timeout 600000 snapmaker-print-copilot "C:\Users\you\Snapmaker-U1-Print-Copilot\.venv\Scripts\print-copilot-mcp.exe"
-```
-
-**Claude Desktop, VS Code (GitHub Copilot), Cursor and most other clients**
-take the same JSON block:
-
-```json
-{
-  "mcpServers": {
-    "snapmaker-print-copilot": {
-      "command": "C:\\Users\\you\\Snapmaker-U1-Print-Copilot\\.venv\\Scripts\\print-copilot-mcp.exe",
-      "args": []
-    }
-  }
-}
-```
-
-| Client | File |
+| Agent | Command |
 | --- | --- |
-| Claude Desktop | `%APPDATA%\Claude\claude_desktop_config.json` (Settings → Developer → Edit Config) |
-| VS Code (GitHub Copilot) | `%USERPROFILE%\.copilot\mcp-config.json` |
-| Cursor | `%USERPROFILE%\.cursor\mcp.json` |
+| Claude Code | `.venv\Scripts\print-copilot connect claude-code` |
+| Codex | `.venv\Scripts\print-copilot connect codex` |
+| Claude Desktop | `.venv\Scripts\print-copilot connect claude-desktop` |
+| VS Code (GitHub Copilot) | `.venv\Scripts\print-copilot connect vscode` |
+| Cursor | `.venv\Scripts\print-copilot connect cursor` |
+| Gemini CLI | `.venv\Scripts\print-copilot connect gemini` |
 
-If the file already has an `mcpServers` object, add the
-`snapmaker-print-copilot` entry inside it. Slicing large models can take
-minutes, so raise the client's tool timeout if slices get cut off.
-[docs/mcp-setup.md](docs/mcp-setup.md) has the details for each client,
-environment variables, the full tool list and example prompts.
+It adds the server to that agent's settings with the right path, keeps the
+other servers and a `.bak` copy of the file, and says what it changed
+(`--dry-run` only shows it). Restart the agent and ask: *"What printer and
+filaments do I have selected in Snapmaker Orca?"*
+
+Without an AI agent, use the same features from the command line: see
+[Usage](#usage).
+
+<details>
+<summary>Problems and other agents</summary>
+
+- No Git: on GitHub choose **Code → Download ZIP**, extract it, open
+  PowerShell in the extracted folder and start from `py -m venv .venv`.
+- `git clone` reports "Filename too long": clone into a shorter folder, or
+  run `git config --global core.longpaths true` first.
+- `py` is not found: use `python` instead.
+- Gemini CLI turns MCP servers off in folders you have not trusted: accept
+  its trust prompt.
+- Large models can take minutes to slice: `connect` sets a 10-minute tool
+  timeout for Codex and Gemini CLI; for Claude Code start it with
+  `MCP_TOOL_TIMEOUT=600000`.
+- Another MCP client: add a stdio server whose command is the full path of
+  `.venv\Scripts\print-copilot-mcp.exe`, with no arguments.
+  [docs/mcp-setup.md](docs/mcp-setup.md) shows the settings for each agent by
+  hand, the environment variables and the full tool list.
+- Update: run `git pull` in the folder. Development (tests, lint): install
+  with `-e ".[dev]"`.
+
+</details>
 
 ## Usage
 
