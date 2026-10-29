@@ -1029,6 +1029,11 @@ def export_project(
         process_name=selection.process.name,
         filament_names=[f.name for f in selection.filaments],
         colours=prepared.colours,
+        bases=[
+            selection.process.settings,
+            *(f.settings for f in selection.filaments),
+            selection.machine.settings,
+        ],
     )
     version = None
     with contextlib.suppress(PrintCopilotError):

@@ -705,14 +705,25 @@ def project_settings(
     process_name: str,
     filament_names: list[str],
     colours: list[str],
+    bases: list[Mapping[str, object]] | None = None,
 ) -> dict[str, object]:
     """The `project_settings.config` JSON for the given flattened presets, in
     the form OrcaSlicer projects use: one flat dict, per-filament keys as one
-    list entry per head."""
+    list entry per head.
+
+    `bases` are the named presets before any override, in `inherits_group`
+    order (process, filaments, machine). When the app opens the project it
+    resets every key not listed in `different_settings_to_system` to the
+    named preset's value (`PresetCollection::load_external_preset`, Snapmaker
+    Orca v2.4.1), so the keys that differ from `bases` are listed there.
+    """
     config: dict[str, object] = {}
     for source in (process, machine):
         config.update({k: v for k, v in source.items() if k not in _PRESET_IDENTITY_KEYS})
-    keys = sorted({k for f in filaments for k in f} - _PRESET_IDENTITY_KEYS)
+    # `version` is one string for the project: as a per-filament list the app's
+    # JSON loader stops at it and drops every key sorted after it, such as
+    # `wall_loops` (log: "type must be string, but is array").
+    keys = sorted({k for f in filaments for k in f} - _PRESET_IDENTITY_KEYS - {"version"})
     for key in keys:
         values: list[object] = []
         for preset in filaments:
@@ -724,9 +735,23 @@ def project_settings(
     config["print_settings_id"] = process_name
     config["filament_settings_id"] = list(filament_names)
     config["inherits_group"] = [process_name, *filament_names, machine_name]
+    if bases is not None:
+        written = [process, *filaments, machine]
+        if len(bases) != len(written):
+            raise ModelError(f"Expected {len(written)} base presets, got {len(bases)}.")
+        config["different_settings_to_system"] = [
+            _different_keys(preset, base) for preset, base in zip(written, bases, strict=True)
+        ]
     config["from"] = "project"
     config["name"] = "project_settings"
     return config
+
+
+def _different_keys(preset: Mapping[str, object], base: Mapping[str, object]) -> str:
+    """The keys of `preset` whose value differs from `base`, joined by `;`
+    as the app writes `different_settings_to_system` entries."""
+    keys = (k for k in preset if k not in _PRESET_IDENTITY_KEYS and preset[k] != base.get(k))
+    return ";".join(sorted(keys))
 
 
 def _plate_xml(object_ids: list[str]) -> bytes:

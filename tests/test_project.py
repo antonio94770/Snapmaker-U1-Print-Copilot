@@ -184,3 +184,48 @@ def test_app_project(tmp_path: Path, project_file: Path) -> None:
     assert stored["filament_colour"] == ["#FFFFFF", "#000000"]
     with pytest.raises(ModelError, match="already exists"):
         write_app_project(copy.path, out, application="x", object_ids=[], settings={})
+
+
+def test_project_settings_lists_keys_changed_from_presets() -> None:
+    # The app resets unlisted keys to the named preset when it opens the project.
+    process = {
+        "name": "P",
+        "wall_loops": "2",
+        "sparse_infill_density": "15%",
+        "layer_height": "0.2",
+    }
+    machine = {"name": "U1", "printable_height": "270"}
+    filament = {
+        "name": "F",
+        "version": "2.0.0.1",
+        "filament_type": ["PLA"],
+        "nozzle_temperature": ["220"],
+    }
+    settings = project_settings(
+        machine,
+        {**process, "wall_loops": "4", "sparse_infill_density": "25%"},
+        [filament, {**filament, "nozzle_temperature": ["230"]}],
+        machine_name="U1",
+        process_name="P",
+        filament_names=["F", "F"],
+        colours=["#FFFFFF", "#000000"],
+        bases=[process, filament, filament, machine],
+    )
+    assert "version" not in settings  # never a per-filament list
+    assert settings["different_settings_to_system"] == [
+        "sparse_infill_density;wall_loops",
+        "",
+        "nozzle_temperature",
+        "",
+    ]
+    with pytest.raises(ModelError, match="Expected 4 base presets"):
+        project_settings(
+            machine,
+            process,
+            [filament, filament],
+            machine_name="U1",
+            process_name="P",
+            filament_names=["F", "F"],
+            colours=["", ""],
+            bases=[process],
+        )
