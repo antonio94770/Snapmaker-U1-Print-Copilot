@@ -52,10 +52,9 @@ build another generic one.
 8. **No AI attribution in git history.** No `Co-Authored-By` trailers,
    "Generated with ..." lines or other AI-tool attribution in commits, PRs or
    GitHub content.
-9. **License:** GPL-3.0-or-later (to be confirmed by the maintainer before the
-   first public push). Snapmaker Orca is AGPL-3.0: invoke it as an external
-   program, do not copy its source into this repository. Do not add dependencies
-   with incompatible licenses.
+9. **License:** GPL-3.0-or-later (`LICENSE`). Snapmaker Orca is AGPL-3.0:
+   invoke it as an external program, do not copy its source into this
+   repository. Do not add dependencies with incompatible licenses.
 
 ## Repository layout
 

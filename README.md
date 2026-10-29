@@ -341,5 +341,5 @@ sliced, and a gated print start, all usable without AI from the CLI.
 
 ## License
 
-Not yet decided (GPL-3.0-or-later is planned). Snapmaker Orca is AGPL-3.0 and
-is only invoked as an external program.
+GPL-3.0-or-later (see [LICENSE](LICENSE)). Snapmaker Orca is AGPL-3.0 and is
+only invoked as an external program.

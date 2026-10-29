@@ -1,5 +1,5 @@
 [build-system]
-requires = ["hatchling>=1.24"]
+requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
 
 [project]
@@ -8,7 +8,8 @@ version = "0.1.0"
 description = "MCP server and CLI that prepares Snapmaker U1 prints with the Snapmaker Orca slicer"
 readme = "README.md"
 requires-python = ">=3.11"
-# License: GPL-3.0-or-later is planned but not yet confirmed by the maintainer.
+license = "GPL-3.0-or-later"
+license-files = ["LICENSE"]
 dependencies = ["mcp>=2.3,<3", "numpy>=1.26", "pydantic>=2"]
 
 [project.optional-dependencies]
