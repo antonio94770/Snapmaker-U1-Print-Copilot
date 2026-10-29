@@ -36,7 +36,8 @@ was not verified on hardware is listed in
 [docs/verified-facts.md](docs/verified-facts.md). Cancel and heaters-off have
 not been sent to a printer yet.
 
-To use it from Claude Code, Codex or Claude Desktop, see
+To use it from Claude Code, Codex, Claude Desktop, VS Code (GitHub Copilot),
+Cursor, Gemini CLI or another MCP client, see
 [docs/mcp-setup.md](docs/mcp-setup.md). Every MCP tool has a CLI command, so
 nothing here needs an AI subscription.
 

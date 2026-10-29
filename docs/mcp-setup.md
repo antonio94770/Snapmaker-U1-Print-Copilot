@@ -1,7 +1,9 @@
 # Using Print Copilot from an AI agent (MCP)
 
 `print-copilot-mcp` is an MCP server that talks over **stdio**. Any MCP client
-can start it; this page covers Claude Code, Codex and Claude Desktop.
+can start it; this page covers Claude Code, Codex, Claude Desktop, VS Code
+(GitHub Copilot), Cursor and Gemini CLI, and the generic form for other
+clients.
 
 ## 1. Install
 
@@ -145,7 +147,72 @@ Settings → Developer → Edit Config opens
 
 Restart Claude Desktop; the tools appear under the tools menu of a new chat.
 
-## 6. Checking the server without an AI client
+## 6. VS Code (GitHub Copilot)
+
+VS Code reads two formats (see its
+[MCP configuration reference](https://code.visualstudio.com/docs/agents/reference/mcp-configuration)).
+For every workspace, use the Copilot user file `~/.copilot/mcp-config.json`
+(`%USERPROFILE%\.copilot\mcp-config.json`, or `mcp-config.json` in
+`COPILOT_HOME` when that is set), which the GitHub Copilot CLI reads too:
+
+```json
+{
+  "mcpServers": {
+    "snapmaker-print-copilot": {
+      "command": "C:\\Users\\you\\Snapmaker_Print_Copilot\\.venv\\Scripts\\print-copilot-mcp.exe",
+      "args": [],
+      "env": {}
+    }
+  }
+}
+```
+
+The VS Code format (`.vscode/mcp.json` or the user-profile `mcp.json`) uses a
+top-level `servers` object instead, with `"type": "stdio"` in the entry. The
+command **MCP: Add Server** writes either one for you. Check the server with
+**MCP: List Servers**, then use Copilot Chat in agent mode.
+
+## 7. Cursor
+
+Add to `~/.cursor/mcp.json` (`%USERPROFILE%\.cursor\mcp.json`) for every
+project, or to `.cursor/mcp.json` in one project:
+
+```json
+{
+  "mcpServers": {
+    "snapmaker-print-copilot": {
+      "type": "stdio",
+      "command": "C:\\Users\\you\\Snapmaker_Print_Copilot\\.venv\\Scripts\\print-copilot-mcp.exe",
+      "args": [],
+      "env": {}
+    }
+  }
+}
+```
+
+The server then appears in Cursor's MCP settings, where it can be turned on
+and off. See [Cursor's MCP documentation](https://cursor.com/docs/mcp).
+
+## 8. Gemini CLI
+
+```bash
+gemini mcp add --scope user --timeout 600000 snapmaker-print-copilot "C:\Users\you\Snapmaker_Print_Copilot\.venv\Scripts\print-copilot-mcp.exe"
+```
+
+This writes the server into `~/.gemini/settings.json` (`--scope project`
+writes `.gemini/settings.json` instead). `--timeout` is in milliseconds; add
+`-e KEY=value` for environment variables. Do not add `--trust`: it skips
+Gemini's confirmation of each tool call. Check with `/mcp` inside a session.
+See the [Gemini CLI MCP documentation](https://geminicli.com/docs/tools/mcp-server/).
+
+## 9. Other clients
+
+Most other MCP clients take the same `mcpServers` block as Claude Desktop
+above: a stdio server whose `command` is the absolute path of
+`print-copilot-mcp.exe`, with no arguments. Look up where your client keeps
+that file, and raise its tool timeout if it has one.
+
+## 10. Checking the server without an AI client
 
 The MCP Inspector (needs Node.js) starts the server and lets you call each
 tool by hand:
@@ -154,7 +221,7 @@ tool by hand:
 npx @modelcontextprotocol/inspector "C:\Users\you\Snapmaker_Print_Copilot\.venv\Scripts\print-copilot-mcp.exe"
 ```
 
-## 7. Example prompts
+## 11. Example prompts
 
 - "What printer and filaments do I have selected in Snapmaker Orca?"
 - "Slice `C:\models\bracket.stl` with my current setup and tell me time and
