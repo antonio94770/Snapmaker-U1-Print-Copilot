@@ -1,13 +1,22 @@
 # Snapmaker Print Copilot
 
 An MCP server and command line that prepare prints for the **Snapmaker U1**
-toolchanger, using **Snapmaker Orca** as the slicing engine. An AI agent
-(Claude Code, Codex, Claude Desktop or any other MCP client) or a person at the
-terminal can take a model or a downloaded 3MF project, check it against the U1
-and the spools that are loaded, try orientations, supports, tool-change
-strategies and settings, compare what the slicer measures, write the chosen
-setup as a project that opens in Snapmaker Orca, and send it to the printer
-only after the user confirms.
+toolchanger, using **Snapmaker Orca** as the slicing engine. It slices the
+alternatives that matter (orientations, supports, prime tower and tool-change
+strategies, settings) and shows what the slicer measured for each, puts the
+plate's colours on the spools the U1's RFID readers report, writes the chosen
+setup as a project that opens in Snapmaker Orca, and starts the print only
+after you confirm. An AI agent (Claude Code, Codex, Claude Desktop or any other
+MCP client) drives it through 24 MCP tools; every tool is also a
+`print-copilot` command.
+
+![Demo: orientation search, a two-colour project mapped to the loaded spools, prime tower strategies, the exported project in Snapmaker Orca and a start plan](docs/images/demo.gif)
+
+A recorded command-line session (51 s, also as [MP4](docs/images/demo.mp4)).
+Every frame shows real output; the printer in the last step is the bundled
+simulator (`print-copilot printer fake`). Upload, start and RFID head mapping
+were also checked on a real U1, see [verified facts](docs/verified-facts.md).
+The demo is rebuilt with `research/demo/`.
 
 ## What a session looks like
 
@@ -220,7 +229,12 @@ part of the same ground:
 - `MoraesGil/snapmaker-orca-mcp`: slices a saved 3MF plate with the Snapmaker
   Orca engine on macOS.
 - `josuanbn/bl2u1`: converts Bambu Studio projects into Snapmaker Orca U1
-  projects.
+  projects; Any2orca does the same for MakerWorld projects.
+- [Snap Studio](https://github.com/kameka22/snap-studio) by kameka22: a
+  desktop app for the U1 with the Snapmaker Orca engine, Claude-based model
+  editing, RFID head mapping and a print queue. Print Copilot is not an app:
+  it gives any MCP agent, or a script, measured comparisons and a quality
+  review, and hands the result to Snapmaker Orca as a project.
 
 What this project adds for the U1: head assignment from the loaded RFID
 spools, measured tool changes, prime tower and supports, strategy and
