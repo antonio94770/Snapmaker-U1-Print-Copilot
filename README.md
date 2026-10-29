@@ -36,10 +36,10 @@ was not verified on hardware is listed in
 [docs/verified-facts.md](docs/verified-facts.md). Cancel and heaters-off have
 not been sent to a printer yet.
 
-To use it from Claude Code, Codex, Claude Desktop, VS Code (GitHub Copilot),
-Cursor, Gemini CLI or another MCP client, see
-[docs/mcp-setup.md](docs/mcp-setup.md). Every MCP tool has a CLI command, so
-nothing here needs an AI subscription.
+[Install it](#install) and [connect it to your AI agent](#connect-an-ai-agent)
+(Claude Code, Codex, Claude Desktop, VS Code, Cursor, Gemini CLI or another
+MCP client). Every MCP tool also has a CLI command, so nothing here needs an
+AI subscription.
 
 ## A typical session
 
@@ -61,20 +61,96 @@ describes:
 6. Uploads the G-code, shows the start plan and starts only after the user
    says so (`upload_to_printer`, `plan_print_start`, `start_print`).
 
-## Requirements
-
-- Windows with Snapmaker Orca installed (verified with 01.10.01.50 and 2.4.1 at
-  `C:\Program Files\Snapmaker_Orca\`) and started at least once, so that
-  `%APPDATA%\Snapmaker_Orca` exists.
-- Python 3.11 or newer.
-
 ## Install
 
-```bash
-python -m venv .venv
-.venv/Scripts/activate
-pip install -e ".[dev]"
+You need:
+
+- Windows with [Snapmaker Orca](https://www.snapmaker.com/snapmaker-orca)
+  installed (verified with 01.10.01.50 and 2.4.1 at
+  `C:\Program Files\Snapmaker_Orca\`) and started at least once, so that
+  `%APPDATA%\Snapmaker_Orca` exists;
+- [Python](https://www.python.org/downloads/windows/) 3.11 or newer;
+- [Git](https://git-scm.com/download/win), or download the repository as a
+  ZIP from GitHub (**Code → Download ZIP**) and extract it.
+
+In PowerShell:
+
+```powershell
+git clone https://github.com/antonio94770/Snapmaker-U1-Print-Copilot.git
+cd Snapmaker-U1-Print-Copilot
+py -m venv .venv
+.venv\Scripts\python -m pip install -e .
 ```
+
+If `git clone` reports "Filename too long", clone into a shorter folder (the
+test fixtures add up to 97 characters to the folder path, and Windows allows
+260) or run `git config --global core.longpaths true` first.
+
+Check that it finds Snapmaker Orca and your presets:
+
+```powershell
+.venv\Scripts\print-copilot setup
+```
+
+This prints the printer, process and filaments selected in Snapmaker Orca.
+The install creates two programs in `.venv\Scripts`: `print-copilot.exe`
+(the command line) and `print-copilot-mcp.exe` (the MCP server for AI
+agents). To update later, run `git pull` in the folder. For development
+(tests and lint), install with `-e ".[dev]"` instead.
+
+## Connect an AI agent
+
+Every client starts the MCP server from its absolute path. The examples
+assume the repository is at `C:\Users\you\Snapmaker-U1-Print-Copilot`;
+replace it with yours. Restart the client after adding the server, and ask
+"What printer and filaments do I have selected in Snapmaker Orca?" to check.
+
+**Claude Code**
+
+```powershell
+claude mcp add --scope user snapmaker-print-copilot -- "C:\Users\you\Snapmaker-U1-Print-Copilot\.venv\Scripts\print-copilot-mcp.exe"
+```
+
+**Codex**: add to `%USERPROFILE%\.codex\config.toml`:
+
+```toml
+[mcp_servers.snapmaker-print-copilot]
+command = 'C:\Users\you\Snapmaker-U1-Print-Copilot\.venv\Scripts\print-copilot-mcp.exe'
+args = []
+tool_timeout_sec = 600
+```
+
+**Gemini CLI**
+
+```powershell
+gemini mcp add --scope user --timeout 600000 snapmaker-print-copilot "C:\Users\you\Snapmaker-U1-Print-Copilot\.venv\Scripts\print-copilot-mcp.exe"
+```
+
+**Claude Desktop, VS Code (GitHub Copilot), Cursor and most other clients**
+take the same JSON block:
+
+```json
+{
+  "mcpServers": {
+    "snapmaker-print-copilot": {
+      "command": "C:\\Users\\you\\Snapmaker-U1-Print-Copilot\\.venv\\Scripts\\print-copilot-mcp.exe",
+      "args": []
+    }
+  }
+}
+```
+
+| Client | File |
+| --- | --- |
+| Claude Desktop | `%APPDATA%\Claude\claude_desktop_config.json` (Settings → Developer → Edit Config) |
+| VS Code (GitHub Copilot) | `%USERPROFILE%\.copilot\mcp-config.json` |
+| Cursor | `%USERPROFILE%\.cursor\mcp.json` |
+
+If the file already has an `mcpServers` object, add the
+`snapmaker-print-copilot` entry inside it. Slicing large models can take
+minutes, so raise the client's tool timeout if slices get cut off.
+[docs/mcp-setup.md](docs/mcp-setup.md) has the details for each client,
+environment variables, the full tool list and example prompts.
 
 ## Usage
 

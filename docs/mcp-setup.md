@@ -7,17 +7,20 @@ clients.
 
 ## 1. Install
 
-From the repository folder (Windows, PowerShell or Git Bash):
+Download and install as described in the README's
+[Install](../README.md#install) section:
 
-```bash
-python -m venv .venv
-.venv/Scripts/python -m pip install -e .
+```powershell
+git clone https://github.com/antonio94770/Snapmaker-U1-Print-Copilot.git
+cd Snapmaker-U1-Print-Copilot
+py -m venv .venv
+.venv\Scripts\python -m pip install -e .
 ```
 
 The server executable is then
 `<repo>\.venv\Scripts\print-copilot-mcp.exe`. Use its **absolute path** in the
 client configs below; the examples assume the repository is at
-`C:\Users\you\Snapmaker_Print_Copilot`.
+`C:\Users\you\Snapmaker-U1-Print-Copilot`.
 
 Optional environment variables (the same ones the CLI reads):
 
@@ -102,7 +105,7 @@ Raise the client's tool timeout if slices get cut off (see below).
 ## 3. Claude Code
 
 ```bash
-claude mcp add --scope user snapmaker-print-copilot -- "C:\Users\you\Snapmaker_Print_Copilot\.venv\Scripts\print-copilot-mcp.exe"
+claude mcp add --scope user snapmaker-print-copilot -- "C:\Users\you\Snapmaker-U1-Print-Copilot\.venv\Scripts\print-copilot-mcp.exe"
 ```
 
 Add `--env PRINT_COPILOT_WORK_DIR=D:\print-runs` (repeatable) before the
@@ -116,7 +119,7 @@ Add to `~/.codex/config.toml` (`%USERPROFILE%\.codex\config.toml` on Windows):
 
 ```toml
 [mcp_servers.snapmaker-print-copilot]
-command = 'C:\Users\you\Snapmaker_Print_Copilot\.venv\Scripts\print-copilot-mcp.exe'
+command = 'C:\Users\you\Snapmaker-U1-Print-Copilot\.venv\Scripts\print-copilot-mcp.exe'
 args = []
 tool_timeout_sec = 600
 
@@ -137,7 +140,7 @@ Settings → Developer → Edit Config opens
 {
   "mcpServers": {
     "snapmaker-print-copilot": {
-      "command": "C:\\Users\\you\\Snapmaker_Print_Copilot\\.venv\\Scripts\\print-copilot-mcp.exe",
+      "command": "C:\\Users\\you\\Snapmaker-U1-Print-Copilot\\.venv\\Scripts\\print-copilot-mcp.exe",
       "args": [],
       "env": {}
     }
@@ -159,7 +162,7 @@ For every workspace, use the Copilot user file `~/.copilot/mcp-config.json`
 {
   "mcpServers": {
     "snapmaker-print-copilot": {
-      "command": "C:\\Users\\you\\Snapmaker_Print_Copilot\\.venv\\Scripts\\print-copilot-mcp.exe",
+      "command": "C:\\Users\\you\\Snapmaker-U1-Print-Copilot\\.venv\\Scripts\\print-copilot-mcp.exe",
       "args": [],
       "env": {}
     }
@@ -182,7 +185,7 @@ project, or to `.cursor/mcp.json` in one project:
   "mcpServers": {
     "snapmaker-print-copilot": {
       "type": "stdio",
-      "command": "C:\\Users\\you\\Snapmaker_Print_Copilot\\.venv\\Scripts\\print-copilot-mcp.exe",
+      "command": "C:\\Users\\you\\Snapmaker-U1-Print-Copilot\\.venv\\Scripts\\print-copilot-mcp.exe",
       "args": [],
       "env": {}
     }
@@ -196,7 +199,7 @@ and off. See [Cursor's MCP documentation](https://cursor.com/docs/mcp).
 ## 8. Gemini CLI
 
 ```bash
-gemini mcp add --scope user --timeout 600000 snapmaker-print-copilot "C:\Users\you\Snapmaker_Print_Copilot\.venv\Scripts\print-copilot-mcp.exe"
+gemini mcp add --scope user --timeout 600000 snapmaker-print-copilot "C:\Users\you\Snapmaker-U1-Print-Copilot\.venv\Scripts\print-copilot-mcp.exe"
 ```
 
 This writes the server into `~/.gemini/settings.json` (`--scope project`
@@ -218,7 +221,7 @@ The MCP Inspector (needs Node.js) starts the server and lets you call each
 tool by hand:
 
 ```bash
-npx @modelcontextprotocol/inspector "C:\Users\you\Snapmaker_Print_Copilot\.venv\Scripts\print-copilot-mcp.exe"
+npx @modelcontextprotocol/inspector "C:\Users\you\Snapmaker-U1-Print-Copilot\.venv\Scripts\print-copilot-mcp.exe"
 ```
 
 ## 11. Example prompts
