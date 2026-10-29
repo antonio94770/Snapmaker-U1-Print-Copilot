@@ -1,18 +1,64 @@
 # Snapmaker Print Copilot
 
-An MCP server and command line that help prepare prints for the
-**Snapmaker U1** toolchanger, using **Snapmaker Orca** as the slicing engine.
-An AI agent (Claude Code, Codex, Claude Desktop, ...) or a person at the
-terminal can list presets, slice a model headlessly and compare the measured
-results.
+An MCP server and command line that prepare prints for the **Snapmaker U1**
+toolchanger, using **Snapmaker Orca** as the slicing engine. An AI agent
+(Claude Code, Codex, Claude Desktop or any other MCP client) or a person at the
+terminal can take a model or a downloaded 3MF project, check it against the U1
+and the spools that are loaded, try orientations, supports, tool-change
+strategies and settings, compare what the slicer measures, write the chosen
+setup as a project that opens in Snapmaker Orca, and send it to the printer
+only after the user confirms.
 
-Status: early development. Presets, headless slicing, orientation search,
-multi-colour 3MF projects, a visual review workflow and printer access through
-Moonraker are available. Printer status, upload and print start are verified
-on a U1 (see [docs/verified-facts.md](docs/verified-facts.md)).
+What it knows about the U1, beyond a generic slicer wrapper:
+
+- **Four heads, real spools.** The filaments a plate uses are put on the head
+  whose loaded colour is closest, read from the U1's RFID readers (or from the
+  app's selection); a one-colour print always asks which head to use.
+- **What a project really prints.** Settings a 3MF stores on objects and parts
+  (MakerWorld projects set infill and supports there) and settings saved for
+  another printer are reported before slicing, because the G-code header does
+  not show them.
+- **Measured, not guessed.** Times and grams are the slicer's own; tool
+  changes, prime tower, purge and support material are measured from the
+  G-code toolpaths. Geometric scores are labelled as heuristics.
+- **Settings from the model.** Thin features, tall parts on a small base,
+  surfaces where layer steps show and the print's purpose decide which few
+  settings are worth slicing as variants.
+- **Nothing physical without consent.** Starting a print goes through a plan
+  that shows the exact request and per-head checks; cancel and heaters-off
+  are never gated.
+- **Snapmaker Orca CLI workarounds** found by testing, so headless slicing of
+  U1 projects works (see [How slicing works](#how-slicing-works)).
+
+Status: working end to end on Windows with Snapmaker Orca 2.4.1. Two real
+prints on a U1 went through upload, start and RFID head mapping; what was and
+was not verified on hardware is listed in
+[docs/verified-facts.md](docs/verified-facts.md). Cancel and heaters-off have
+not been sent to a printer yet.
 
 To use it from Claude Code, Codex or Claude Desktop, see
-[docs/mcp-setup.md](docs/mcp-setup.md).
+[docs/mcp-setup.md](docs/mcp-setup.md). Every MCP tool has a CLI command, so
+nothing here needs an AI subscription.
+
+## A typical session
+
+With the MCP server connected, the agent follows the order the server
+describes:
+
+1. Reads what is selected in Snapmaker Orca and what the U1 reports
+   (`get_current_setup`, `printer_status`).
+2. Inspects the project (`inspect_project`): plates, size and fit, filaments
+   and proposed heads, object settings and differences from the process. It
+   tells the user before slicing and asks which values to keep.
+3. Optionally compares orientations and supports (`optimize_orientation`),
+   tool-change strategies (`compare_strategies`) and the settings the model's
+   shape bears on (`suggest_settings`).
+4. Reviews the effective settings and the toolpaths (`review_print`,
+   `preview_gcode`).
+5. Writes the chosen setup as a new 3MF, slices that same file and opens it
+   in Snapmaker Orca (`export_project`).
+6. Uploads the G-code, shows the start plan and starts only after the user
+   says so (`upload_to_printer`, `plan_print_start`, `start_print`).
 
 ## Requirements
 
@@ -267,6 +313,31 @@ multi-colour project, and are skipped when Snapmaker Orca is not installed.
 Tests on real downloaded projects run when `PRINT_COPILOT_TEST_PROJECTS`
 points to a folder filled by `python research/m4-probe/download_projects.py <folder>`
 (the files are not in the repository; their licences vary).
+
+## Related projects
+
+This project is original work: it does not fork or include another project's
+code. It runs Snapmaker Orca (AGPL-3.0, based on OrcaSlicer) as an external
+program and talks to the U1 through Moonraker's HTTP API. Projects that cover
+part of the same ground:
+
+- Generic OrcaSlicer MCP servers: `orcaslicer-mcp` by MaxEllis (needs a
+  patched OrcaSlicer build with a local API), `orca-mcp` (wraps the
+  OrcaSlicer CLI, parameter sweeps), `claude-orcaslicer-mcp` by
+  ShreddyKrueger75 (slicing and sending to a printer) and
+  `itsumonotakumi/orcaslicer-mcp`.
+- `mcp-3d-printer-server` by DMontgomery40: printer control over MCP, with a
+  Moonraker backend.
+- `MoraesGil/snapmaker-orca-mcp`: slices a saved 3MF plate with the Snapmaker
+  Orca engine on macOS.
+- `josuanbn/bl2u1`: converts Bambu Studio projects into Snapmaker Orca U1
+  projects.
+
+What this project adds for the U1: head assignment from the loaded RFID
+spools, measured tool changes, prime tower and supports, strategy and
+settings comparisons, a quality review of the effective settings and
+toolpaths, projects exported for Snapmaker Orca from the same file that is
+sliced, and a gated print start, all usable without AI from the CLI.
 
 ## License
 
