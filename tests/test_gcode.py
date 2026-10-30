@@ -60,6 +60,27 @@ def test_config_block_values_do_not_leak_into_summary() -> None:
     assert result.print_settings_id == "Quoted name"
 
 
+def test_layer_count_is_the_header_number_not_the_footer_counter() -> None:
+    # Orca 01.10.01.50 wrote 808 layers and "total layers count = 810" (a firmware
+    # progress counter); the header number matches the ;LAYER_CHANGE markers.
+    text = """; total layer number: 808
+; filament used [g] = 1.00
+; total filament used [g] = 1.00
+; estimated printing time (normal mode) = 1m 0s
+; total layers count = 810
+"""
+    assert parse_gcode_text(text).layer_count == 808
+
+
+def test_layer_count_falls_back_to_the_footer_counter() -> None:
+    text = """; filament used [g] = 1.00
+; total filament used [g] = 1.00
+; estimated printing time (normal mode) = 1m 0s
+; total layers count = 3
+"""
+    assert parse_gcode_text(text).layer_count == 3
+
+
 def test_missing_time_fails() -> None:
     text = "; filament used [g] = 1.0\n; total filament used [g] = 1.0\n; total layers count = 3\n"
     with pytest.raises(GcodeParseError, match="estimated printing time"):

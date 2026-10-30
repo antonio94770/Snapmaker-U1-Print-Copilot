@@ -159,7 +159,11 @@ def parse_gcode_text(lines: list[str] | str) -> SliceResult:
     filament_g = _floats(required("filament used [g]"))
     total_g = float(required("total filament used [g]"))
 
-    layer_text = summary.get("total layers count") or required("total layer number")
+    # "total layer number" in the header equals the ;LAYER_CHANGE markers (808 of 808,
+    # 599 of 599, verified on 01.10.01.50). "total layers count" in the footer is the
+    # firmware progress counter and can be larger (810 for 808 layers), so it is only
+    # a fallback for files without the header line.
+    layer_text = summary.get("total layer number") or required("total layers count")
     first_layer = summary.get("estimated first layer printing time (normal mode)")
     max_z = summary.get("max_z_height")
     cost_total = summary.get("total filament cost")

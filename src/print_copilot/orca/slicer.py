@@ -75,6 +75,23 @@ PROTECTED_KEYS: frozenset[str] = frozenset(
     {"name", "inherits", "from", "instantiation", "setting_id", "type"}
 )
 
+# Plate types the CLI accepts as `--curr-bed-type`. Without it the CLI slices
+# for "Cool Plate" (G-code `curr_bed_type = Cool Plate`, bed 60 C) whatever the
+# app has selected. "Textured PEI Plate" was verified on 01.10.01.50
+# (2026-10-30): `curr_bed_type = Textured PEI Plate` and bed 65 C in the G-code;
+# `--curr_bed_type` with underscores makes the CLI exit with -2. The other
+# names are the strings in Snapmaker_Orca.dll, not run through the CLI yet
+# (TO VERIFY IN SNAPMAKER ORCA).
+BED_TYPES: tuple[str, ...] = (
+    "Cool Plate",
+    "Engineering Plate",
+    "High Temp Plate",
+    "Textured PEI Plate",
+    "Smooth PEI Plate",
+    "Graphic Effect Plate",
+)
+BED_TYPE_ARG = "--curr-bed-type"
+
 OverrideValue = str | int | float | bool | list[str]
 
 # Flat override keys may carry a section prefix, e.g. `machine.nozzle_diameter`.
@@ -349,10 +366,13 @@ def slice_model(
     filament_colours: list[str] | None = None,
     extra_args: list[str] | None = None,
     process_extra: Mapping[str, list[str]] | None = None,
+    bed_type: str | None = None,
 ) -> SliceRun:
     """Slice `model` with the given presets and parse the resulting G-code.
 
     `overrides` change settings of the flattened presets for this run only.
+    `bed_type` (one of `BED_TYPES`) is the plate the G-code is sliced for; it
+    is checked in the G-code config block.
     `filament_colours` (one per head) is written into each filament preset;
     painted models need it. `extra_args` go before the model path.
     `process_extra` adds process keys the preset does not define (only
@@ -364,6 +384,8 @@ def slice_model(
     if not model_path.is_file():
         raise SliceError(f"Model file not found: {model_path}")
 
+    if bed_type is not None and bed_type not in BED_TYPES:
+        raise SliceError(f"Unknown bed type {bed_type!r}; use one of: {', '.join(BED_TYPES)}.")
     overrides = overrides or SettingsOverrides()
     machine_s, process_s, filament_s = prepare_cli_settings(machine, process, filaments, overrides)
     if filament_colours is not None:
@@ -412,6 +434,7 @@ def slice_model(
         "--outputdir",
         cli_path(out_dir),
         *(extra_args or []),
+        *((BED_TYPE_ARG, bed_type) if bed_type else ()),
         cli_path(model_path),
     ]
     (run_dir / "command.txt").write_text(subprocess.list2cmdline(command) + "\n", encoding="utf-8")
@@ -462,6 +485,14 @@ def slice_model(
             check_overrides_applied(read_config_block(gcode_path), checked)
         except SliceError as exc:
             raise SliceError(f"{exc} Run dir: {run_dir}") from exc
+
+    if bed_type:
+        sliced_for = read_config_block(gcode_path).get("curr_bed_type")
+        if sliced_for != bed_type:
+            raise SliceError(
+                f"G-code was sliced for plate {sliced_for!r}, expected {bed_type!r}. "
+                f"Run dir: {run_dir}"
+            )
 
     if result.tool_count != len(filaments):
         raise SliceError(

@@ -30,6 +30,7 @@ from print_copilot.model.orientation import (
     oriented_mesh,
     regions_mask,
     rotation_to_bed,
+    stepped_overhang_note,
 )
 from print_copilot.model.render import (
     BASE_COLOR,
@@ -419,7 +420,20 @@ def analyze_model(
         )
     except ValueError as exc:
         raise ModelError(str(exc)) from exc
-    analysis.notes = notes + analysis.notes
+    layer_height_mm = None
+    if selection is not None:
+        try:
+            layer_height_mm = float(selection.process.settings["layer_height"])
+        except (KeyError, TypeError, ValueError):
+            layer_height_mm = None
+    # The orientation the model will print in if nothing is changed, else the best one.
+    shown = next((c for c in analysis.candidates if c.origin == "as loaded"), None)
+    step_note = stepped_overhang_note(
+        shown or analysis.candidates[0],
+        threshold_deg=threshold_deg,
+        layer_height_mm=layer_height_mm,
+    )
+    analysis.notes = notes + analysis.notes + ([step_note] if step_note else [])
     return analysis
 
 

@@ -64,7 +64,7 @@ mDNS, once per server process, and found again if it stops answering):
 | `printer_status` | state, temperatures, active head, the spool each head's RFID reader identified, and while printing the layer, Z and an estimate of the time left | `print-copilot printer status` |
 | `list_printer_files` | G-code files stored on the printer | `print-copilot printer files` |
 | `upload_to_printer` | copies a G-code file sliced for the U1; refuses other printers and overwrites; never starts it | `print-copilot printer upload` |
-| `plan_print_start` | sends nothing: returns the exact start request, the file's slicer figures, per-head checks and a one-time token | `print-copilot printer start --dry-run` |
+| `plan_print_start` | sends nothing: returns the exact start request, the file's slicer figures, per-head checks, whether a recorded quality review (`review_report`) covers the file, and a one-time token | `print-copilot printer start --dry-run [--review-report report.json]` |
 | `start_print` | starts a planned file; asks the user again through MCP elicitation when the client supports it | `print-copilot printer start` (typed confirmation) |
 | `cancel_print`, `heaters_off` | safety actions, never gated | `print-copilot printer cancel`, `printer heaters-off` |
 

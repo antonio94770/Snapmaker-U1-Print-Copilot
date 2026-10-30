@@ -76,7 +76,9 @@ Usual flow:
    render_model and optimize_orientation for orientation (protect regions with
    goal="quality" for surfaces that must print cleanly). Then ask whether the
    print is visual or functional and call suggest_settings on the model as it
-   will print; its variants are heuristics to slice in review_print.
+   will print; its variants are heuristics to slice in review_print. Read the
+   analyze_model notes aloud: they flag surfaces that print without supports
+   but with visible layer steps, which changes the layer height to offer.
 4. Check quality: review_print (effective-settings audit and toolpath images)
    and preview_gcode on critical layers; an inventoried setting is not an
    automatically validated one. If the user skips it, at least
@@ -86,7 +88,11 @@ Usual flow:
 5. export_project writes the project, slices it, puts the .gcode next to the
    .3mf and opens it in Snapmaker Orca for the user to see.
 6. upload_to_printer (never starts), then plan_print_start / start_print as
-   above. Tell the user the .3mf path: open_in_orca reopens what was printed.
+   above; pass the review's report.json as review_report and show the plan's
+   `review` line (a missing review is a warning, not a block). Tell the user
+   the .3mf path: open_in_orca reopens what was printed. Pass bed_type to
+   export_project for the plate on the printer: without it the slicer uses
+   its own default plate and bed temperature, not the plate chosen in the app.
 slice / compare_variants take STL files with T0 and preset JSON key overrides
 (sparse_infill_density="30%"; prefix machine. or filament.); unknown or
 silently replaced values are rejected."""
@@ -517,6 +523,7 @@ def slice_project(
     filaments: list[str] | None = None,
     head: int | None = None,
     use_printer: bool = True,
+    bed_type: str | None = None,
 ) -> dict[str, Any]:
     """Slice one plate of a 3MF project (or an STL) on the U1 and return measured time,
     grams per head, tool changes, layers with changes, prime tower and purge
@@ -530,6 +537,9 @@ def slice_project(
         plate or an STL: ask the user which loaded spool to use.
     use_printer: read the loaded colours from the U1's RFID readers (falls
         back to the app's selection, with a note, when the printer is away).
+    bed_type: the plate on the printer ("Textured PEI Plate", "Cool Plate", ...).
+        Without it the slicer uses its own default (Cool Plate, bed 60 C), not
+        the plate selected in the app; say which plate the user has.
     overrides, printer, process, filaments: as for slice.
     """
     install, selection = _project_selection(printer, process, filaments, use_printer)
@@ -542,6 +552,7 @@ def slice_project(
         reduce_colours=reduce_colours,
         overrides=overrides,
         head=head,
+        bed_type=bed_type,
     )
     data = to_jsonable(result)
     data["notes"] = selection.notes + data["notes"]
@@ -614,6 +625,7 @@ def export_project(
     head: int | None = None,
     use_printer: bool = True,
     slice: bool = True,
+    bed_type: str | None = None,
 ) -> dict[str, Any]:
     """Write one plate of a project (or an STL) as a NEW 3MF for Snapmaker
     Orca: objects centred on the U1 bed, filaments on the chosen heads, the
@@ -642,6 +654,7 @@ def export_project(
         overrides=overrides,
         head=head,
         slice_gcode=slice,
+        bed_type=bed_type,
     )
     data = to_jsonable(exported)
     data["notes"] = selection.notes + data["notes"]
@@ -824,7 +837,7 @@ def upload_to_printer(
 
 @server.tool(annotations=PRINTER_READ)
 @_tool_errors
-def plan_print_start(filename: str) -> dict[str, Any]:
+def plan_print_start(filename: str, review_report: str | None = None) -> dict[str, Any]:
     """Prepare starting a file already on the printer. Sends nothing.
 
     Returns the exact request start_print would send, the slicer's figures
@@ -832,8 +845,13 @@ def plan_print_start(filename: str) -> dict[str, Any]:
     spool it holds, and checks (errors block the start). Show all of it to the
     user. The token works once, for 10 minutes, and only if neither the file
     nor the printer state changes.
+
+    review_report: the report.json of the quality review of this file
+    (review_print, then record_quality_review). The plan's `review` field says
+    whether that review covers the file; without one it says the review was not
+    run. Tell the user that too. It never blocks the start.
     """
-    plan = printer.plan_start(MoonrakerClient(), filename)
+    plan = printer.plan_start(MoonrakerClient(), filename, review_report=review_report)
     data = to_jsonable(plan)
     data["blocked"] = plan.blocked
     if plan.blocked:
@@ -864,6 +882,8 @@ def _confirmation_message(plan: printer.StartPlan) -> str:
             f"({head.weight_g} g), RFID spool: {head.loaded_type or 'none read'}"
         )
     lines += [f"{c.level.upper()}: {c.message}" for c in plan.checks]
+    if plan.review:
+        lines.append(f"REVIEW {plan.review.level.upper()}: {plan.review.message}")
     return "\n".join(lines)
 
 

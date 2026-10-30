@@ -478,6 +478,8 @@ def test_export_slices_the_written_project(fake_install, fake_multi, selection, 
     assert read_project(fake_multi.commands[0][-1]).plate_filaments(1) == [2]
     assert exported.slice.heads[0].head == 1
     assert any(f"open {out}" in n for n in exported.notes)
+    # No plate was chosen: the export says the slicer's default plate was used.
+    assert any("No bed_type was given" in n for n in exported.notes)
     (tmp_path / "taken.gcode").write_text("x")
     with pytest.raises(SliceError, match=r"taken\.gcode already exists"):
         multicolor.export_project(

@@ -40,6 +40,15 @@ DEFAULT_FLAT_FACE_CANDIDATES = 6
 # ("staircase effect") most; flat tops are printed as solid top layers.
 STAIR_MIN_DEG = 2.0
 STAIR_MAX_DEG = 30.0
+# Downward surfaces that need no support but slope less than this from horizontal
+# print as visible layer steps: each layer overhangs the one below by
+# layer_height / tan(slope) (geometry, not a slicer figure).
+STEPPED_OVERHANG_MAX_SLOPE_DEG = 45.0
+# Below this area the note is not worth the user's attention.
+STEPPED_OVERHANG_NOTE_MIN_MM2 = 100.0
+# Faces exactly on the support threshold count as stepped whichever side float
+# rounding puts them on.
+_THRESHOLD_EPSILON = 1e-4
 # Elevations (degrees above horizontal) a protected surface is turned to when
 # extra candidates are generated for it, and how many azimuths per elevation.
 REGION_ELEVATIONS_DEG: tuple[float, ...] = (0.0, 30.0, 45.0, 60.0, 90.0)
@@ -173,6 +182,7 @@ class FaceClasses:
     stair: np.ndarray
     height_above_bed_mm: np.ndarray
     size_mm: list[float]
+    stepped_overhang: np.ndarray | None = None
 
 
 def classify_faces(
@@ -193,7 +203,14 @@ def classify_faces(
     stair = (facing_up > math.cos(math.radians(STAIR_MAX_DEG))) & (
         facing_up < math.cos(math.radians(STAIR_MIN_DEG))
     )
-    return FaceClasses(on_bed, needs_support, stair, height, [float(v) for v in high - low])
+    stepped = (
+        (facing_down > math.cos(math.radians(STEPPED_OVERHANG_MAX_SLOPE_DEG)))
+        & (facing_down <= math.cos(math.radians(threshold_deg)) + _THRESHOLD_EPSILON)
+        & (height >= BED_CONTACT_TOL_MM)
+    )
+    return FaceClasses(
+        on_bed, needs_support, stair, height, [float(v) for v in high - low], stepped
+    )
 
 
 @dataclass
@@ -207,6 +224,7 @@ class SurfaceMetrics:
     protected_overhang_area_mm2: float | None = None
     protected_bed_contact_area_mm2: float | None = None
     protected_stair_area_mm2: float | None = None
+    stepped_overhang_area_mm2: float = 0.0
 
 
 def measure(
@@ -227,6 +245,7 @@ def measure(
         support_volume_mm3=float((projected[support] * classes.height_above_bed_mm[support]).sum()),
         stair_area_mm2=float(areas[classes.stair].sum()),
         size_mm=classes.size_mm,
+        stepped_overhang_area_mm2=float(areas[classes.stepped_overhang].sum()),
     )
     if protected is not None:
         metrics.protected_area_mm2 = float(areas[protected].sum())
@@ -253,6 +272,9 @@ class OrientationCandidate:
     protected_overhang_area_mm2: float | None = None
     protected_bed_contact_area_mm2: float | None = None
     protected_stair_area_mm2: float | None = None
+    # Downward surface between the support threshold and STEPPED_OVERHANG_MAX_SLOPE_DEG
+    # from horizontal: printed without supports, with visible layer steps. Not ranked.
+    stepped_overhang_area_mm2: float = 0.0
     quality_cost: float = 0.0  # heuristic, lower is better, see QUALITY_WEIGHTS
     stable: bool = True  # bed contact >= STABLE_CONTACT_RATIO of the X/Y box area
     fits_bed: bool | None = None  # None when the bed size is unknown
@@ -451,6 +473,7 @@ def analyse_orientations(
                 protected_overhang_area_mm2=_round(m.protected_overhang_area_mm2, 2),
                 protected_bed_contact_area_mm2=_round(m.protected_bed_contact_area_mm2, 2),
                 protected_stair_area_mm2=_round(m.protected_stair_area_mm2, 2),
+                stepped_overhang_area_mm2=round(m.stepped_overhang_area_mm2, 2),
                 fits_bed=fits,
             )
         )
@@ -504,6 +527,37 @@ def analyse_orientations(
         protected_area_mm2=_round(protected_area, 2),
         notes=notes,
     )
+
+
+def stepped_overhang_note(
+    candidate: OrientationCandidate,
+    *,
+    threshold_deg: float,
+    layer_height_mm: float | None,
+) -> str | None:
+    """Warn that downward slopes below the support threshold print without supports
+    but with visible layer steps. Geometry only; the roughness is not measured."""
+    area = candidate.stepped_overhang_area_mm2
+    if area < STEPPED_OVERHANG_NOTE_MIN_MM2:
+        return None
+    steepest = math.tan(math.radians(threshold_deg))
+    text = (
+        f"Orientation {candidate.label!r}: {area:.0f} mm2 of downward surface slopes between "
+        f"{threshold_deg:g} and {STEPPED_OVERHANG_MAX_SLOPE_DEG:g} degrees from horizontal. It "
+        "prints without supports but with visible layer steps (geometry, not measured "
+        "roughness): each layer overhangs the one below by layer height / tan(slope), "
+    )
+    if layer_height_mm:
+        text += (
+            f"up to {layer_height_mm / steepest:.2f} mm at {layer_height_mm:g} mm layers "
+            f"(slope {threshold_deg:g} degrees). "
+        )
+    else:
+        text += f"up to {1 / steepest:.2f} x the layer height (slope {threshold_deg:g} degrees). "
+    text += (
+        "Tell the user before printing: finer layers shrink the steps, at the cost of print time."
+    )
+    return text
 
 
 def oriented_mesh(mesh: Mesh, candidate: OrientationCandidate) -> Mesh:

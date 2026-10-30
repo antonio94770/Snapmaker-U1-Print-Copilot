@@ -51,8 +51,12 @@ The experiment exposed two distinct limitations:
 
 1. **0.20 mm: quality audit blocked.** Orca's header says
    `total layer number: 599`, matching 599 `;LAYER_CHANGE` markers, while its
-   final summary says `total layers count = 600`. The strict audit retains
-   this disagreement as an error; it was not waived or silently corrected.
+   final summary says `total layers count = 600`. The strict audit retained
+   this disagreement as an error at the time. Later it turned out that the
+   footer figure is the firmware progress counter (810 for 808 layers in a
+   2026-10-30 print), so the parser now takes the header number and keeps the
+   footer one only as a fallback; the audit still fails when the markers
+   disagree with the header.
 2. **0.16 mm: complete preview blocked.** Header, markers and summary agree
    at 749 layers, but the complete offline HTML preview exceeds its 100 MB
    guard. A separately labelled selected-layer excerpt was generated from

@@ -15,7 +15,7 @@ from print_copilot.model.orientation import GOALS, OrientationAnalysis, Region
 from print_copilot.model.render import VIEWS
 from print_copilot.orca.install import locate, locate_data_dir
 from print_copilot.orca.presets import DEFAULT_VENDOR, KINDS, PresetLibrary
-from print_copilot.orca.slicer import DEFAULT_TIMEOUT_S, SliceRun
+from print_copilot.orca.slicer import BED_TYPES, DEFAULT_TIMEOUT_S, SliceRun
 from print_copilot.printer import actions as printer
 from print_copilot.printer import discovery
 from print_copilot.printer.fake import FakeMoonraker
@@ -483,6 +483,12 @@ def parse_mapping(items: list[str] | None) -> dict[int, int] | None:
     return result or None
 
 
+BED_TYPE_HELP = (
+    "plate the G-code is sliced for; without it the slicer uses its own default "
+    "(Cool Plate, bed 60 C), not the plate selected in the app"
+)
+
+
 def parse_head(value: str | None) -> int | None:
     """`T1` or `1` to 1."""
     if value is None:
@@ -591,6 +597,7 @@ def cmd_slice_project(args: argparse.Namespace) -> int:
         work_dir=args.work_dir,
         timeout_s=args.timeout,
         head=parse_head(args.head),
+        bed_type=args.bed_type,
     )
     if args.json:
         _print_json(result)
@@ -660,6 +667,7 @@ def cmd_export_project(args: argparse.Namespace) -> int:
         head=parse_head(args.head),
         slice_gcode=not args.no_slice,
         timeout_s=args.timeout,
+        bed_type=args.bed_type,
     )
     opened = multicolor.open_in_app(install, exported.path) if args.open else None
     if args.json:
@@ -856,11 +864,13 @@ def _print_plan(plan: printer.StartPlan) -> None:
         )
     for check in plan.checks:
         print(f"  {check.level.upper()}: {check.message}")
+    if plan.review:
+        print(f"  REVIEW {plan.review.level.upper()}: {plan.review.message}")
 
 
 def cmd_printer_start(args: argparse.Namespace) -> int:
     client = _client(args)
-    plan = printer.plan_start(client, args.filename)
+    plan = printer.plan_start(client, args.filename, review_report=args.review_report)
     _print_plan(plan)
     if plan.blocked:
         print("Blocked: fix the errors above. Nothing was sent.", file=sys.stderr)
@@ -1153,6 +1163,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="slice one plate of a 3MF project on the U1 and measure tool changes",
     )
     sp.add_argument("--set", action="append", metavar="KEY=VALUE", help="as for slice")
+    sp.add_argument("--bed-type", choices=BED_TYPES, help=BED_TYPE_HELP)
     sp.set_defaults(func=cmd_slice_project)
 
     sg = sub.add_parser(
@@ -1180,6 +1191,7 @@ def build_parser() -> argparse.ArgumentParser:
         "PRINT_COPILOT_EXPORT_DIR, %%LOCALAPPDATA%%\\print-copilot\\exports)",
     )
     ep.add_argument("--set", action="append", metavar="KEY=VALUE", help="as for slice")
+    ep.add_argument("--bed-type", choices=BED_TYPES, help=BED_TYPE_HELP)
     ep.add_argument("--open", action="store_true", help="open the written project in the app")
     ep.add_argument(
         "--no-slice",
@@ -1249,6 +1261,10 @@ def build_parser() -> argparse.ArgumentParser:
         "start", parents=[net], help="start a stored file after showing the plan and confirming"
     )
     pst.add_argument("filename", help="file name on the printer")
+    pst.add_argument(
+        "--review-report",
+        help="report.json of the quality review of this file; the plan says if it covers it",
+    )
     pst.add_argument("--dry-run", action="store_true", help="show the plan only")
     pst.add_argument("--yes", action="store_true", help="confirm without the typed prompt")
     pst.set_defaults(func=cmd_printer_start)

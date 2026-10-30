@@ -234,6 +234,19 @@ is under `runs/recheck241-complete/` (ignored). No printer calls were made.
   at info level. `--help` prints the option list in a real Windows console;
   our redirected-output capture missed the reopened `CONOUT$` streams.
   The original missing-help and wholly-silent-substitution claims are withdrawn.
+- **Plate type (2026-10-30, 01.10.01.50):** without an option the CLI slices for
+  `curr_bed_type = Cool Plate` (bed 60 C), whatever plate the app has selected
+  (`app.curr_bed_type` = `"4"`; the app showed "Textured PEI" for it). The CLI
+  option is `--curr-bed-type "Textured PEI Plate"` (G-code then shows that plate
+  and bed 65 C); `--curr_bed_type` with underscores exits with -2. The other plate
+  names are the strings in `Snapmaker_Orca.dll`, not run through the CLI yet
+  (TO VERIFY IN SNAPMAKER ORCA).
+- **Layer count (2026-10-30, 01.10.01.50):** a 0.20 mm print had
+  `; total layer number: 808` in the header, 808 `;LAYER_CHANGE` markers and
+  `; total layers count = 810` in the footer. The start G-code writes
+  `SET_PRINT_STATS_INFO TOTAL_LAYER={total_layer_count}`, so the printer shows
+  x/810 for an 808-layer print. The header number is the real count (also
+  599 of 599 in an earlier trial); the footer one is the firmware counter.
 - **Output path observation:** directory length 229 works and 230 fails for
   the tested generated filename on this Windows installation. Do not treat
   that threshold as a universal directory limit or a confirmed root cause.

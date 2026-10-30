@@ -10,6 +10,7 @@ from print_copilot.model.orientation import (
     measure,
     oriented_mesh,
     rotation_to_bed,
+    stepped_overhang_note,
 )
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -68,6 +69,46 @@ def test_threshold_changes_overhang() -> None:
     high = measure(tilted, np.eye(3), threshold_deg=60).overhang_area_mm2
     assert low == 0
     assert high > 0
+
+
+def _cube_tilted(degrees: float):
+    angle = np.radians(degrees)
+    about_y = np.array(
+        [[np.cos(angle), 0, np.sin(angle)], [0, 1, 0], [-np.sin(angle), 0, np.cos(angle)]]
+    )
+    return load_stl(CUBE).transformed(about_y)
+
+
+@pytest.mark.parametrize(
+    ("tilt", "stepped", "supported"),
+    # A tilted cube has two slopes that add up to 90 degrees: 38 and 52 (only the first is
+    # stepped), 20 and 70 (the first needs support), 80 and 10 (the second needs support).
+    [(38, True, False), (20, False, True), (80, False, True)],
+)
+def test_stepped_overhang_sits_between_support_threshold_and_45(tilt, stepped, supported) -> None:
+    face = measure(load_stl(CUBE), np.eye(3)).bed_contact_area_mm2
+    m = measure(_cube_tilted(tilt), np.eye(3), threshold_deg=30)
+    assert (m.stepped_overhang_area_mm2 == pytest.approx(face)) is stepped
+    assert (m.overhang_area_mm2 == pytest.approx(face)) is supported
+    if not stepped:
+        assert m.stepped_overhang_area_mm2 == 0
+
+
+def test_stepped_overhang_note_gives_the_step_per_layer() -> None:
+    analysis = analyse_orientations(_cube_tilted(38), threshold_deg=30)
+    as_loaded = next(c for c in analysis.candidates if c.origin == "as loaded")
+    note = stepped_overhang_note(as_loaded, threshold_deg=30, layer_height_mm=0.2)
+    # 0.2 / tan(30 degrees) = 0.35 mm of overhang per layer at the support threshold.
+    assert note is not None and "0.35 mm at 0.2 mm layers" in note
+    assert "Tell the user" in note
+    assert "x the layer height" in stepped_overhang_note(
+        as_loaded, threshold_deg=30, layer_height_mm=None
+    )
+
+
+def test_no_stepped_overhang_means_no_note(tee) -> None:
+    candidate = analyse_orientations(tee).candidates[0]
+    assert stepped_overhang_note(candidate, threshold_deg=30, layer_height_mm=0.2) is None
 
 
 def test_candidates_that_do_not_fit_rank_last(tee) -> None:

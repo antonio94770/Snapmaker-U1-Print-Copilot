@@ -11,6 +11,7 @@ and heaters-off are never gated.
 
 from __future__ import annotations
 
+import json
 import secrets
 import time
 from dataclasses import dataclass, field
@@ -90,6 +91,9 @@ class StartPlan:
         "Nothing has been sent. Show this plan to the user; start only after the user "
         "explicitly confirms this file on this printer."
     )
+    # Whether a recorded quality review covers this file. Never blocks the start: the
+    # user may choose to print without one, but the plan says so.
+    review: Check | None = None
 
     @property
     def blocked(self) -> bool:
@@ -254,8 +258,62 @@ def _checks(meta: dict[str, Any], status: PrinterStatus, uses: list[HeadUse]) ->
     return checks
 
 
-def plan_start(client: MoonrakerClient, filename: str, *, now: float | None = None) -> StartPlan:
-    """Build the confirmation plan for starting `filename`. Sends nothing."""
+def _review_check(report: str | Path | None, name: str, size_bytes: int) -> Check:
+    """Say whether `report` (a quality report.json) reviewed this very file.
+
+    The file on the printer is matched to a reviewed .gcode of the report by name and
+    byte size; the report's own seal and evidence hashes are checked when a review is
+    recorded, not here."""
+    if report is None:
+        return Check(
+            "warning",
+            "No quality review was given for this file (pass review_report). Run review_print "
+            "and record_quality_review, or tell the user the review was not run.",
+        )
+    path = Path(report)
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        status = str(data["status"])
+        evidence = [Path(p) for p in data["evidence_sha256"] if str(p).lower().endswith(".gcode")]
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        return Check("warning", f"Cannot read the quality review {path}: {exc}")
+    covered = False
+    for candidate in evidence:
+        try:
+            covered = candidate.name == name and candidate.stat().st_size == size_bytes
+        except OSError:
+            covered = False
+        if covered:
+            break
+    if not covered:
+        return Check(
+            "warning",
+            f"The quality review {path} does not cover {name} (no reviewed .gcode of that name "
+            "and size); treat this file as not reviewed.",
+        )
+    if status != "reviewed_with_limitations":
+        return Check(
+            "warning",
+            f"The quality review of this file is {status!r}, not an accepted visual review.",
+        )
+    review = data.get("review") or {}
+    return Check(
+        "info",
+        f"Quality review recorded for this file (variant {review.get('variant')!r}, accepted "
+        "with limitations). It is a visual attestation, not a guarantee of print quality.",
+    )
+
+
+def plan_start(
+    client: MoonrakerClient,
+    filename: str,
+    *,
+    now: float | None = None,
+    review_report: str | Path | None = None,
+) -> StartPlan:
+    """Build the confirmation plan for starting `filename`. Sends nothing.
+
+    `review_report` is the quality report.json of the review of this file, if any."""
     name = check_remote_name(filename)
     meta = client.file_metadata(name)
     status = read_status(client)
@@ -276,6 +334,7 @@ def plan_start(client: MoonrakerClient, filename: str, *, now: float | None = No
         heads=uses,
         checks=_checks(meta, status, uses),
         printer_state=status.print_state,
+        review=_review_check(review_report, name, int(meta.get("size", 0))),
     )
     if not plan.blocked:
         _pending[plan.token] = plan

@@ -9,6 +9,7 @@ from print_copilot.errors import SliceError
 from print_copilot.orca.install import OrcaInstall
 from print_copilot.orca.presets import PresetLibrary
 from print_copilot.orca.slicer import (
+    BED_TYPE_ARG,
     SettingsOverrides,
     check_overrides_applied,
     prepare_cli_settings,
@@ -194,3 +195,54 @@ def test_too_long_work_dir_fails_before_slicing(fake_orca, presets, install, mod
     with pytest.raises(SliceError, match="too long"):
         slice_model(install, model, *presets, work_dir=deep)
     assert fake_orca.commands == []
+
+
+def _gcode_for_plate(cube_gcode: Path, tmp_path: Path, plate: str) -> Path:
+    path = tmp_path / "plate.gcode"
+    path.write_text(
+        cube_gcode.read_text(encoding="utf-8").replace(
+            "; curr_bed_type = Cool Plate", f"; curr_bed_type = {plate}"
+        ),
+        encoding="utf-8",
+    )
+    return path
+
+
+def test_bed_type_is_passed_to_the_cli_and_checked(
+    monkeypatch, tmp_path, presets, install, model, cube_gcode
+) -> None:
+    gcode = _gcode_for_plate(cube_gcode, tmp_path, "Textured PEI Plate")
+    run, calls = fake_slicer(gcode)
+    monkeypatch.setattr(subprocess, "run", run)
+
+    slice_model(install, model, *presets, work_dir=tmp_path / "runs", bed_type="Textured PEI Plate")
+
+    command = calls[0]
+    index = command.index(BED_TYPE_ARG)
+    assert command[index + 1] == "Textured PEI Plate"
+    assert index < len(command) - 1  # before the model path
+
+
+def test_wrong_plate_in_gcode_fails_loudly(
+    monkeypatch, tmp_path, presets, install, model, cube_gcode
+) -> None:
+    # The fixture G-code is sliced for the Cool Plate.
+    monkeypatch.setattr(subprocess, "run", fake_slicer(cube_gcode)[0])
+    with pytest.raises(SliceError, match="sliced for plate 'Cool Plate'"):
+        slice_model(
+            install, model, *presets, work_dir=tmp_path / "runs", bed_type="Textured PEI Plate"
+        )
+
+
+def test_unknown_bed_type_fails_before_slicing(presets, install, model, tmp_path) -> None:
+    with pytest.raises(SliceError, match="Unknown bed type"):
+        slice_model(install, model, *presets, work_dir=tmp_path, bed_type="Glass")
+
+
+def test_no_bed_type_adds_no_argument(
+    monkeypatch, tmp_path, presets, install, model, cube_gcode
+) -> None:
+    run, calls = fake_slicer(cube_gcode)
+    monkeypatch.setattr(subprocess, "run", run)
+    slice_model(install, model, *presets, work_dir=tmp_path / "runs")
+    assert BED_TYPE_ARG not in calls[0]

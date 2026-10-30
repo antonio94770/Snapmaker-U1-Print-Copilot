@@ -1,6 +1,7 @@
 """Moonraker client, gated printer actions, MCP tools and CLI against the fake U1."""
 
 import asyncio
+import json
 import struct
 from pathlib import Path
 from types import SimpleNamespace
@@ -245,6 +246,63 @@ def test_nozzle_mismatch_blocks_and_spool_mismatch_warns(cube_gcode, tmp_path) -
     assert ("error", "T0: file expects a 0.4 mm nozzle, printer reports 0.6 mm.") in (messages)
     assert ("warning", "T0: file uses PLA, RFID spool is PETG.") in messages
     assert plan.blocked
+
+
+def _review_report(tmp_path: Path, stored: str, size: int, status: str, name: str | None = None):
+    reviewed = tmp_path / (name or stored)
+    reviewed.write_bytes(b"x" * size)
+    report = tmp_path / "report.json"
+    report.write_text(
+        json.dumps(
+            {
+                "status": status,
+                "evidence_sha256": {str(reviewed): "0" * 64, str(tmp_path / "p.png"): "0" * 64},
+                "review": {"variant": "baseline"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    return report
+
+
+def test_plan_says_when_no_review_was_given(client, stored) -> None:
+    plan = actions.plan_start(client, stored)
+    assert plan.review.level == "warning" and "No quality review" in plan.review.message
+    assert not plan.blocked  # a missing review never blocks the start
+
+
+def test_plan_reports_a_review_that_covers_the_file(client, stored, tmp_path) -> None:
+    size = actions.plan_start(client, stored).size_bytes
+    report = _review_report(tmp_path, stored, size, "reviewed_with_limitations")
+    plan = actions.plan_start(client, stored, review_report=report)
+    assert plan.review.level == "info" and "attestation" in plan.review.message
+
+
+@pytest.mark.parametrize("status", ["visual_review_pending", "blocked", "revision_requested"])
+def test_plan_warns_when_the_review_is_not_accepted(client, stored, tmp_path, status) -> None:
+    size = actions.plan_start(client, stored).size_bytes
+    plan = actions.plan_start(
+        client, stored, review_report=_review_report(tmp_path, stored, size, status)
+    )
+    assert plan.review.level == "warning" and status in plan.review.message
+    assert not plan.blocked
+
+
+def test_plan_warns_when_the_review_is_of_another_file(client, stored, tmp_path) -> None:
+    size = actions.plan_start(client, stored).size_bytes
+    other = _review_report(tmp_path, stored, size + 1, "reviewed_with_limitations")
+    assert (
+        "does not cover" in actions.plan_start(client, stored, review_report=other).review.message
+    )
+    renamed = _review_report(tmp_path, stored, size, "reviewed_with_limitations", name="x.gcode")
+    assert (
+        "does not cover" in actions.plan_start(client, stored, review_report=renamed).review.message
+    )
+
+
+def test_plan_warns_when_the_review_cannot_be_read(client, stored, tmp_path) -> None:
+    plan = actions.plan_start(client, stored, review_report=tmp_path / "missing.json")
+    assert plan.review.level == "warning" and "Cannot read" in plan.review.message
 
 
 def test_missing_rfid_spool_is_a_warning(cube_gcode) -> None:

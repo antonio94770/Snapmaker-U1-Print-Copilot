@@ -26,6 +26,7 @@ import numpy as np
 from print_copilot.actions import CONF_SOURCE, Selection, Variant, bed_size
 from print_copilot.errors import GcodeParseError, PrintCopilotError, SliceError
 from print_copilot.gcode.features import feature_extrusion
+from print_copilot.gcode.header import read_config_block
 from print_copilot.gcode.toolchanges import ToolChangeStats, grams_per_mm, to_grams, tool_changes
 from print_copilot.model.footprint import free_rectangle, occupancy
 from print_copilot.model.mesh import load_3mf_items, load_mesh
@@ -51,6 +52,7 @@ from print_copilot.orca.project import (
     write_slicing_copy,
 )
 from print_copilot.orca.slicer import (
+    BED_TYPES,
     DEFAULT_TIMEOUT_S,
     OverrideValue,
     SettingsOverrides,
@@ -712,6 +714,7 @@ def slice_project(
     work_dir: str | os.PathLike[str] | None = None,
     timeout_s: float = DEFAULT_TIMEOUT_S,
     head: int | None = None,
+    bed_type: str | None = None,
 ) -> ProjectSlice:
     """Slice one plate of a 3MF project on the selected printer.
 
@@ -722,13 +725,14 @@ def slice_project(
     (`HeadChoiceRequired`). An STL or plain 3MF is handled as a one-object
     project. A copy the CLI can read is written into a fresh folder and sliced
     with `--arrange 0`; tool changes, prime tower and purge are measured from
-    the G-code.
+    the G-code. `bed_type` is the plate to slice for (`slicer.BED_TYPES`); without
+    it the slicer uses its own default, not the plate selected in the app.
     """
     base = to_windows_path(work_dir) if work_dir else default_work_dir()
     folder = base / f"project-{datetime.now():%Y%m%d-%H%M%S}-{uuid.uuid4().hex[:6]}"
     folder.mkdir(parents=True)
     prepared = _prepare(model, selection, plate, mapping, folder, reduce_colours, head, overrides)
-    return _slice_prepared(install, prepared, selection, overrides, folder, timeout_s)
+    return _slice_prepared(install, prepared, selection, overrides, folder, timeout_s, bed_type)
 
 
 def _support_summary(run: SliceRun, project: ProjectInfo, plate: int) -> SupportSummary:
@@ -779,6 +783,7 @@ def _slice_prepared(
     overrides: dict[str, OverrideValue] | None,
     folder: Path,
     timeout_s: float,
+    bed_type: str | None = None,
 ) -> ProjectSlice:
     def run_once(extra: dict[str, list[str]] | None) -> SliceRun:
         return slice_model(
@@ -793,6 +798,7 @@ def _slice_prepared(
             filament_colours=prepared.colours,
             extra_args=list(PROJECT_CLI_ARGS),
             process_extra=extra,
+            bed_type=bed_type,
         )
 
     tower_notes = []
@@ -815,6 +821,12 @@ def _slice_prepared(
         support = None
         notes.append(f"Supports not measured: {exc}")
     notes = tower_notes + notes
+    if bed_type is None:
+        notes.append(
+            "No bed type was given: the slicer used its own default "
+            f"({read_config_block(run.gcode_path).get('curr_bed_type')!r}), "
+            "not the plate selected in the app. Pass bed_type for the plate on the printer."
+        )
     result = ProjectSlice(
         project=prepared.project.path,
         plate=prepared.plate,
@@ -978,6 +990,9 @@ class ExportedProject:
     # next to it, and that slice's measured figures.
     gcode_path: Path | None = None
     slice: ProjectSlice | None = None
+    # The plate (`curr_bed_type`) the G-code was sliced for, read back from its config
+    # block; it sets the bed temperature the printer will use.
+    gcode_bed_type: str | None = None
 
 
 def export_project(
@@ -994,6 +1009,7 @@ def export_project(
     head: int | None = None,
     slice_gcode: bool = False,
     timeout_s: float = DEFAULT_TIMEOUT_S,
+    bed_type: str | None = None,
 ) -> ExportedProject:
     """Write one plate of a project (or an STL) as a new 3MF for Snapmaker
     Orca: objects centred on the bed, filaments assigned to heads like
@@ -1060,6 +1076,7 @@ def export_project(
         settings=settings,
     )
     sliced = None
+    gcode_bed_type = None
     if gcode_out is not None:
         # In the written project filament N is printed by head N-1.
         heads_used = {c.head for c in prepared.assignment.choices}
@@ -1071,8 +1088,18 @@ def export_project(
             overrides=overrides,
             work_dir=folder,
             timeout_s=timeout_s,
+            bed_type=bed_type,
         )
         shutil.copy2(sliced.gcode_path, gcode_out)
+        gcode_bed_type = read_config_block(gcode_out).get("curr_bed_type")
+        if bed_type is None:
+            notes.append(
+                f"No bed_type was given: {gcode_out.name} was sliced for "
+                f"{gcode_bed_type or 'an unknown plate'}, the slicer's own default, not the plate "
+                "selected in the app. The plate sets the bed "
+                "temperature on the printer: ask the user which plate is on it and export again "
+                f"with bed_type (one of {', '.join(BED_TYPES)})."
+            )
         if sliced.support is not None:
             notes += support_notes(sliced.support)
         notes.append(
@@ -1091,6 +1118,7 @@ def export_project(
         notes=notes,
         gcode_path=gcode_out,
         slice=sliced,
+        gcode_bed_type=gcode_bed_type,
     )
 
 
