@@ -1,5 +1,9 @@
 # Snapmaker Print Copilot
 
+[![CI](https://github.com/antonio94770/Snapmaker-U1-Print-Copilot/actions/workflows/ci.yml/badge.svg)](https://github.com/antonio94770/Snapmaker-U1-Print-Copilot/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/antonio94770/Snapmaker-U1-Print-Copilot)](https://github.com/antonio94770/Snapmaker-U1-Print-Copilot/releases)
+[![License: GPL-3.0-or-later](https://img.shields.io/badge/license-GPL--3.0--or--later-blue)](LICENSE)
+
 An MCP server and command line that prepare prints for the **Snapmaker U1**
 toolchanger, using **Snapmaker Orca** as the slicing engine. It slices the
 alternatives that matter (orientations, supports, prime tower and tool-change
@@ -115,9 +119,12 @@ powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | ie
 **2. Install Print Copilot.** Open a new PowerShell window and paste:
 
 ```powershell
-uv tool install https://github.com/antonio94770/Snapmaker-U1-Print-Copilot/archive/refs/heads/main.zip
+uv tool install https://github.com/antonio94770/Snapmaker-U1-Print-Copilot/archive/refs/tags/v0.1.0.zip
 print-copilot setup
 ```
+
+This installs release 0.1.0 ([changes](CHANGELOG.md)). For the latest
+unreleased code, use `.../archive/refs/heads/main.zip` instead.
 
 `setup` should print your printer, process and filaments as selected in
 Snapmaker Orca. If it does, everything is installed. If PowerShell says
@@ -141,7 +148,8 @@ other servers and a `.bak` copy of the file, and says what it changed
 filaments do I have selected in Snapmaker Orca?"*
 
 **Update** with
-`uv tool install --reinstall https://github.com/antonio94770/Snapmaker-U1-Print-Copilot/archive/refs/heads/main.zip`;
+`uv tool install --reinstall` and the zip of a newer
+[release](https://github.com/antonio94770/Snapmaker-U1-Print-Copilot/releases);
 **remove** with `uv tool uninstall snapmaker-print-copilot`.
 
 <details>

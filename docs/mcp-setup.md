@@ -10,7 +10,7 @@ clients.
 Install as described in the README's [Install](../README.md#install) section:
 
 ```powershell
-uv tool install https://github.com/antonio94770/Snapmaker-U1-Print-Copilot/archive/refs/heads/main.zip
+uv tool install https://github.com/antonio94770/Snapmaker-U1-Print-Copilot/archive/refs/tags/v0.1.0.zip
 ```
 
 The easy way to connect an agent is one command, for example

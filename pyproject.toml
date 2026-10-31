@@ -27,6 +27,9 @@ print-copilot-mcp = "print_copilot.mcp_server:main"
 [tool.hatch.build.targets.wheel]
 packages = ["src/print_copilot"]
 
+[tool.hatch.build.targets.sdist]
+include = ["/src", "/tests", "/README.md", "/CHANGELOG.md", "/LICENSE"]
+
 [tool.ruff]
 line-length = 100
 target-version = "py311"
